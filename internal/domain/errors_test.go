@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"testing"
 
 	"claude-memory-sync/internal/domain"
@@ -28,8 +29,8 @@ func TestError(t *testing.T) {
 		wrapped := domain.Error(domain.ErrNotFound, "record lookup failed")
 
 		attrs := domain.ErrorAttrs(wrapped)
-		origin := findOriginAttr(t, attrs)
-		assert.Contains(t, origin, "errors_test.go")
+		origins := findOriginAttr(t, attrs)
+		assertAnyContains(t, origins, "errors_test.go")
 	})
 
 	t.Run("sets user facing message", func(t *testing.T) {
@@ -54,8 +55,8 @@ func TestWrapError(t *testing.T) {
 		wrapped := domain.WrapError(domain.ErrUpstream)
 
 		attrs := domain.ErrorAttrs(wrapped)
-		origin := findOriginAttr(t, attrs)
-		assert.Contains(t, origin, "errors_test.go")
+		origins := findOriginAttr(t, attrs)
+		assertAnyContains(t, origins, "errors_test.go")
 	})
 
 	t.Run("does not set a user facing message", func(t *testing.T) {
@@ -78,6 +79,17 @@ func findOriginAttr(t *testing.T, attrs []slog.Attr) []string {
 	}
 	t.Fatal("no origin attr found")
 	return nil
+}
+
+func assertAnyContains(t *testing.T, values []string, substr string) {
+	t.Helper()
+
+	for _, v := range values {
+		if strings.Contains(v, substr) {
+			return
+		}
+	}
+	t.Fatalf("no value in %v contains %q", values, substr)
 }
 
 func TestErrorAttrs(t *testing.T) {
