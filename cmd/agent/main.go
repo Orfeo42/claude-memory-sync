@@ -71,13 +71,14 @@ func main() {
 	slog.SetDefault(logger)
 
 	cfg := loadConfig()
+
 	client := syncer.NewHTTPClient(cfg.ServerURL, cfg.Token, cfg.ClientID)
 	agent := syncer.New(cfg, client)
 
 	slog.Info("starting memory-agent",
-		slog.String("serverUrl", cfg.ServerURL),
-		slog.String("clientId", cfg.ClientID),
-		slog.String("slugPrefix", cfg.SlugPrefix),
+		slog.String("server_url", cfg.ServerURL),
+		slog.String("client_id", cfg.ClientID),
+		slog.String("slug_prefix", cfg.SlugPrefix),
 		slog.Duration("interval", cfg.Interval),
 	)
 

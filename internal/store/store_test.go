@@ -25,7 +25,7 @@ func TestNew(t *testing.T) {
 	t.Run("initializes git repo with canonical and clients dirs", func(t *testing.T) {
 		root := t.TempDir()
 
-		_, err := store.New(root)
+		_, err := store.New(t.Context(), root)
 		require.NoError(t, err)
 
 		assert.DirExists(t, filepath.Join(root, ".git"))
@@ -41,10 +41,10 @@ func TestNew(t *testing.T) {
 	t.Run("idempotent when called on an already initialized store", func(t *testing.T) {
 		root := t.TempDir()
 
-		_, err := store.New(root)
+		_, err := store.New(t.Context(), root)
 		require.NoError(t, err)
 
-		_, err = store.New(root)
+		_, err = store.New(t.Context(), root)
 		require.NoError(t, err)
 
 		log := gitLog(t, root)
@@ -56,12 +56,12 @@ func TestNew(t *testing.T) {
 func TestGitStoreTree(t *testing.T) {
 	t.Run("returns manifest of files in namespace", func(t *testing.T) {
 		root := t.TempDir()
-		s, err := store.New(root)
+		s, err := store.New(t.Context(), root)
 		require.NoError(t, err)
 
-		require.NoError(t, s.Write("clients/host-a", "global/CLAUDE.md", []byte("hello"), "host-a"))
+		require.NoError(t, s.Write(t.Context(), "clients/host-a", "global/CLAUDE.md", []byte("hello"), "host-a"))
 
-		tree, err := s.Tree("clients/host-a")
+		tree, err := s.Tree(t.Context(), "clients/host-a")
 		require.NoError(t, err)
 		require.Len(t, tree, 1)
 		assert.Equal(t, "global/CLAUDE.md", tree[0].Path)
@@ -69,20 +69,20 @@ func TestGitStoreTree(t *testing.T) {
 
 	t.Run("returns empty manifest for namespace with no files yet", func(t *testing.T) {
 		root := t.TempDir()
-		s, err := store.New(root)
+		s, err := store.New(t.Context(), root)
 		require.NoError(t, err)
 
-		tree, err := s.Tree("clients/host-b")
+		tree, err := s.Tree(t.Context(), "clients/host-b")
 		require.NoError(t, err)
 		assert.Empty(t, tree)
 	})
 
 	t.Run("rejects invalid namespace", func(t *testing.T) {
 		root := t.TempDir()
-		s, err := store.New(root)
+		s, err := store.New(t.Context(), root)
 		require.NoError(t, err)
 
-		_, err = s.Tree("../etc")
+		_, err = s.Tree(t.Context(), "../etc")
 		require.ErrorIs(t, err, store.ErrInvalidNamespace)
 	})
 }
@@ -90,10 +90,10 @@ func TestGitStoreTree(t *testing.T) {
 func TestGitStoreWrite(t *testing.T) {
 	t.Run("writes file content and commits", func(t *testing.T) {
 		root := t.TempDir()
-		s, err := store.New(root)
+		s, err := store.New(t.Context(), root)
 		require.NoError(t, err)
 
-		err = s.Write("clients/host-a", "global/CLAUDE.md", []byte("hello"), "host-a")
+		err = s.Write(t.Context(), "clients/host-a", "global/CLAUDE.md", []byte("hello"), "host-a")
 		require.NoError(t, err)
 
 		content, err := os.ReadFile(filepath.Join(root, "clients", "host-a", "global", "CLAUDE.md"))
@@ -106,13 +106,13 @@ func TestGitStoreWrite(t *testing.T) {
 
 	t.Run("second write with identical content is a no-op commit", func(t *testing.T) {
 		root := t.TempDir()
-		s, err := store.New(root)
+		s, err := store.New(t.Context(), root)
 		require.NoError(t, err)
 
-		require.NoError(t, s.Write("clients/host-a", "global/CLAUDE.md", []byte("hello"), "host-a"))
+		require.NoError(t, s.Write(t.Context(), "clients/host-a", "global/CLAUDE.md", []byte("hello"), "host-a"))
 		logBefore := gitLog(t, root)
 
-		require.NoError(t, s.Write("clients/host-a", "global/CLAUDE.md", []byte("hello"), "host-a"))
+		require.NoError(t, s.Write(t.Context(), "clients/host-a", "global/CLAUDE.md", []byte("hello"), "host-a"))
 		logAfter := gitLog(t, root)
 
 		assert.Equal(t, logBefore, logAfter)
@@ -120,19 +120,19 @@ func TestGitStoreWrite(t *testing.T) {
 
 	t.Run("rejects path traversal", func(t *testing.T) {
 		root := t.TempDir()
-		s, err := store.New(root)
+		s, err := store.New(t.Context(), root)
 		require.NoError(t, err)
 
-		err = s.Write("clients/host-a", "../../etc/passwd", []byte("x"), "host-a")
+		err = s.Write(t.Context(), "clients/host-a", "../../etc/passwd", []byte("x"), "host-a")
 		require.ErrorIs(t, err, store.ErrInvalidPath)
 	})
 
 	t.Run("rejects absolute path", func(t *testing.T) {
 		root := t.TempDir()
-		s, err := store.New(root)
+		s, err := store.New(t.Context(), root)
 		require.NoError(t, err)
 
-		err = s.Write("clients/host-a", "/etc/passwd", []byte("x"), "host-a")
+		err = s.Write(t.Context(), "clients/host-a", "/etc/passwd", []byte("x"), "host-a")
 		require.ErrorIs(t, err, store.ErrInvalidPath)
 	})
 }
@@ -140,21 +140,21 @@ func TestGitStoreWrite(t *testing.T) {
 func TestGitStoreRead(t *testing.T) {
 	t.Run("reads existing file content", func(t *testing.T) {
 		root := t.TempDir()
-		s, err := store.New(root)
+		s, err := store.New(t.Context(), root)
 		require.NoError(t, err)
-		require.NoError(t, s.Write("clients/host-a", "global/CLAUDE.md", []byte("hello"), "host-a"))
+		require.NoError(t, s.Write(t.Context(), "clients/host-a", "global/CLAUDE.md", []byte("hello"), "host-a"))
 
-		content, err := s.Read("clients/host-a", "global/CLAUDE.md")
+		content, err := s.Read(t.Context(), "clients/host-a", "global/CLAUDE.md")
 		require.NoError(t, err)
 		assert.Equal(t, "hello", string(content))
 	})
 
 	t.Run("returns ErrNotFound for missing file", func(t *testing.T) {
 		root := t.TempDir()
-		s, err := store.New(root)
+		s, err := store.New(t.Context(), root)
 		require.NoError(t, err)
 
-		_, err = s.Read("clients/host-a", "global/CLAUDE.md")
+		_, err = s.Read(t.Context(), "clients/host-a", "global/CLAUDE.md")
 		require.ErrorIs(t, err, store.ErrNotFound)
 	})
 }
@@ -162,11 +162,11 @@ func TestGitStoreRead(t *testing.T) {
 func TestGitStoreDelete(t *testing.T) {
 	t.Run("deletes existing file and commits", func(t *testing.T) {
 		root := t.TempDir()
-		s, err := store.New(root)
+		s, err := store.New(t.Context(), root)
 		require.NoError(t, err)
-		require.NoError(t, s.Write("clients/host-a", "global/CLAUDE.md", []byte("hello"), "host-a"))
+		require.NoError(t, s.Write(t.Context(), "clients/host-a", "global/CLAUDE.md", []byte("hello"), "host-a"))
 
-		err = s.Delete("clients/host-a", "global/CLAUDE.md", "host-a")
+		err = s.Delete(t.Context(), "clients/host-a", "global/CLAUDE.md", "host-a")
 		require.NoError(t, err)
 
 		_, statErr := os.Stat(filepath.Join(root, "clients", "host-a", "global", "CLAUDE.md"))
@@ -178,12 +178,12 @@ func TestGitStoreDelete(t *testing.T) {
 
 	t.Run("deleting a missing file is a no-op", func(t *testing.T) {
 		root := t.TempDir()
-		s, err := store.New(root)
+		s, err := store.New(t.Context(), root)
 		require.NoError(t, err)
 
 		logBefore := gitLog(t, root)
 
-		err = s.Delete("clients/host-a", "global/CLAUDE.md", "host-a")
+		err = s.Delete(t.Context(), "clients/host-a", "global/CLAUDE.md", "host-a")
 		require.NoError(t, err)
 
 		logAfter := gitLog(t, root)

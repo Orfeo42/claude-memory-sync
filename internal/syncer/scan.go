@@ -1,6 +1,7 @@
 package syncer
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -64,7 +65,7 @@ func scanClaudeMD(claudeDir string) (*manifest.Entry, string, error) {
 		return nil, "", fmt.Errorf("hash %s: %w", path, err)
 	}
 
-	return &manifest.Entry{Path: "global/CLAUDE.md", SHA256: sum, Size: info.Size()}, path, nil
+	return &manifest.Entry{Path: globalClaudeMDPath, SHA256: sum, Size: info.Size()}, path, nil
 }
 
 func scanRules(claudeDir string) (manifest.Manifest, map[string]string, error) {
@@ -94,27 +95,44 @@ func scanRules(claudeDir string) (manifest.Manifest, map[string]string, error) {
 			continue
 		}
 
-		filePath := filepath.Join(rulesDir, e.Name())
-		fileInfo, lErr := os.Lstat(filePath)
-		if lErr != nil {
-			return nil, nil, fmt.Errorf("lstat %s: %w", filePath, lErr)
-		}
-		if fileInfo.Mode()&os.ModeSymlink != 0 {
-			slog.Warn("skipping symlinked rule file, machine not yet migrated", slog.String("path", filePath))
+		ruleFile, scanErr := scanRuleFile(rulesDir, e.Name())
+		if errors.Is(scanErr, errSkipSymlinkedFile) {
 			continue
 		}
-
-		sum, hErr := manifest.HashFile(filePath)
-		if hErr != nil {
-			return nil, nil, fmt.Errorf("hash %s: %w", filePath, hErr)
+		if scanErr != nil {
+			return nil, nil, scanErr
 		}
 
-		nsPath := "global/rules/" + e.Name()
-		result = append(result, manifest.Entry{Path: nsPath, SHA256: sum, Size: fileInfo.Size()})
-		paths[nsPath] = filePath
+		result = append(result, ruleFile.entry)
+		paths[ruleFile.entry.Path] = ruleFile.fsPath
 	}
 
 	return result, paths, nil
+}
+
+type ruleFile struct {
+	entry  manifest.Entry
+	fsPath string
+}
+
+func scanRuleFile(rulesDir, name string) (*ruleFile, error) {
+	filePath := filepath.Join(rulesDir, name)
+	fileInfo, err := os.Lstat(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("lstat %s: %w", filePath, err)
+	}
+	if fileInfo.Mode()&os.ModeSymlink != 0 {
+		slog.Warn("skipping symlinked rule file, machine not yet migrated", slog.String("path", filePath))
+		return nil, errSkipSymlinkedFile
+	}
+
+	sum, err := manifest.HashFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("hash %s: %w", filePath, err)
+	}
+
+	nsPath := "global/rules/" + name
+	return &ruleFile{entry: manifest.Entry{Path: nsPath, SHA256: sum, Size: fileInfo.Size()}, fsPath: filePath}, nil
 }
 
 func scanProjects(claudeDir, slugPrefix string) (manifest.Manifest, map[string]string, error) {

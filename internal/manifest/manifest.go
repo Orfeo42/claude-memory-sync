@@ -47,42 +47,24 @@ func Build(root string, whitelist WhitelistFunc) (Manifest, error) {
 			return nil
 		}
 
-		relPath, relErr := filepath.Rel(root, path)
+		relPath, relErr := relSlashPath(root, path)
 		if relErr != nil {
-			return fmt.Errorf("relative path: %w", relErr)
+			return relErr
 		}
-		relPath = filepath.ToSlash(relPath)
 
 		if d.IsDir() {
-			if !whitelist(relPath, d) {
-				return filepath.SkipDir
-			}
+			return walkDir(relPath, d, whitelist)
+		}
+
+		if skipFile(d, relPath, whitelist) {
 			return nil
 		}
 
-		if d.Type()&fs.ModeSymlink != 0 {
-			return nil
+		entry, entryErr := buildEntry(path, relPath, d)
+		if entryErr != nil {
+			return entryErr
 		}
-
-		if !whitelist(relPath, d) {
-			return nil
-		}
-
-		info, infoErr := d.Info()
-		if infoErr != nil {
-			return fmt.Errorf("file info: %w", infoErr)
-		}
-
-		sum, hashErr := HashFile(path)
-		if hashErr != nil {
-			return fmt.Errorf("hash file: %w", hashErr)
-		}
-
-		result = append(result, Entry{
-			Path:   relPath,
-			SHA256: sum,
-			Size:   info.Size(),
-		})
+		result = append(result, entry)
 		return nil
 	})
 	if walkErr != nil {
@@ -90,6 +72,46 @@ func Build(root string, whitelist WhitelistFunc) (Manifest, error) {
 	}
 
 	return result, nil
+}
+
+func relSlashPath(root, path string) (string, error) {
+	relPath, err := filepath.Rel(root, path)
+	if err != nil {
+		return "", fmt.Errorf("relative path: %w", err)
+	}
+	return filepath.ToSlash(relPath), nil
+}
+
+func walkDir(relPath string, d fs.DirEntry, whitelist WhitelistFunc) error {
+	if whitelist(relPath, d) {
+		return nil
+	}
+	return filepath.SkipDir
+}
+
+func skipFile(d fs.DirEntry, relPath string, whitelist WhitelistFunc) bool {
+	if d.Type()&fs.ModeSymlink != 0 {
+		return true
+	}
+	return !whitelist(relPath, d)
+}
+
+func buildEntry(path, relPath string, d fs.DirEntry) (Entry, error) {
+	info, err := d.Info()
+	if err != nil {
+		return Entry{}, fmt.Errorf("file info: %w", err)
+	}
+
+	sum, err := HashFile(path)
+	if err != nil {
+		return Entry{}, fmt.Errorf("hash file: %w", err)
+	}
+
+	return Entry{
+		Path:   relPath,
+		SHA256: sum,
+		Size:   info.Size(),
+	}, nil
 }
 
 func HashFile(path string) (string, error) {

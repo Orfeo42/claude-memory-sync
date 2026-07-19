@@ -6,9 +6,11 @@ import (
 	"strings"
 )
 
+const globalClaudeMDPath = "global/CLAUDE.md"
+
 func localPath(nsPath, claudeDir, slugPrefix string) (string, error) {
 	switch {
-	case nsPath == "global/CLAUDE.md":
+	case nsPath == globalClaudeMDPath:
 		return filepath.Join(claudeDir, "CLAUDE.md"), nil
 
 	case strings.HasPrefix(nsPath, "global/rules/"):

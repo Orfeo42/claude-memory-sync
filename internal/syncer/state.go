@@ -31,7 +31,7 @@ func loadManifest(path string) (manifest.Manifest, error) {
 }
 
 func saveManifest(path string, m manifest.Manifest) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return fmt.Errorf("create state dir: %w", err)
 	}
 
@@ -40,7 +40,7 @@ func saveManifest(path string, m manifest.Manifest) error {
 		return fmt.Errorf("marshal state: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("write state %s: %w", path, err)
 	}
 	return nil
