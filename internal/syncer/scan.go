@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/Orfeo42/claude-memory-sync/internal/manifest"
+	"claude-memory-sync/internal/manifest"
 )
 
 func scanLocal(claudeDir, slugPrefix string) (manifest.Manifest, map[string]string, error) {

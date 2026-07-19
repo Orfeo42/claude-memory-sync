@@ -7,7 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Orfeo42/claude-memory-sync/internal/store"
+	"claude-memory-sync/internal/store"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

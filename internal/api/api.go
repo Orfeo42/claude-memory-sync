@@ -6,7 +6,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 
-	"github.com/Orfeo42/claude-memory-sync/internal/store"
+	"claude-memory-sync/internal/store"
 )
 
 const apiTitle = "memory-sync"

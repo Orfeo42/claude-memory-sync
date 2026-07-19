@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/Orfeo42/claude-memory-sync/internal/api"
-	"github.com/Orfeo42/claude-memory-sync/internal/store"
+	"claude-memory-sync/internal/api"
+	"claude-memory-sync/internal/store"
 )
 
 const (

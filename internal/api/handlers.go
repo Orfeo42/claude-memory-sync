@@ -6,8 +6,8 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/Orfeo42/claude-memory-sync/internal/manifest"
-	"github.com/Orfeo42/claude-memory-sync/internal/store"
+	"claude-memory-sync/internal/manifest"
+	"claude-memory-sync/internal/store"
 )
 
 const clientsNamespacePrefix = "clients/"

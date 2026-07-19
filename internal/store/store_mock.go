@@ -4,7 +4,7 @@
 package store
 
 import (
-	"github.com/Orfeo42/claude-memory-sync/internal/manifest"
+	"claude-memory-sync/internal/manifest"
 	"sync"
 )
 

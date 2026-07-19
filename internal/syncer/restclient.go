@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Orfeo42/claude-memory-sync/internal/manifest"
+	"claude-memory-sync/internal/manifest"
 )
 
 const httpTimeout = 30 * time.Second

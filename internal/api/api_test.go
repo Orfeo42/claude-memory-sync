@@ -10,9 +10,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/Orfeo42/claude-memory-sync/internal/api"
-	"github.com/Orfeo42/claude-memory-sync/internal/manifest"
-	"github.com/Orfeo42/claude-memory-sync/internal/store"
+	"claude-memory-sync/internal/api"
+	"claude-memory-sync/internal/manifest"
+	"claude-memory-sync/internal/store"
 )
 
 const testToken = "test-token"

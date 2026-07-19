@@ -1,4 +1,4 @@
-module github.com/Orfeo42/claude-memory-sync
+module claude-memory-sync
 
 go 1.26
 

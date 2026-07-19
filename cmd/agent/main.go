@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/Orfeo42/claude-memory-sync/internal/syncer"
+	"claude-memory-sync/internal/syncer"
 )
 
 const (

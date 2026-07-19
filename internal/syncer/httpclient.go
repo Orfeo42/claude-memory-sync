@@ -5,7 +5,7 @@ package syncer
 import (
 	"context"
 
-	"github.com/Orfeo42/claude-memory-sync/internal/manifest"
+	"claude-memory-sync/internal/manifest"
 )
 
 type HTTPClient interface {

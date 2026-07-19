@@ -3,7 +3,8 @@ package manifest_test
 import (
 	"testing"
 
-	"github.com/Orfeo42/claude-memory-sync/internal/manifest"
+	"claude-memory-sync/internal/manifest"
+
 	"github.com/stretchr/testify/assert"
 )
 

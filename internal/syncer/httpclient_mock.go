@@ -4,8 +4,8 @@
 package syncer
 
 import (
+	"claude-memory-sync/internal/manifest"
 	"context"
-	"github.com/Orfeo42/claude-memory-sync/internal/manifest"
 	"sync"
 )
 
