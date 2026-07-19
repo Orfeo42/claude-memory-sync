@@ -1,0 +1,19 @@
+services:
+  memory-agent:
+    build:
+      context: ../..
+      dockerfile: build/agent.Dockerfile
+    volumes:
+      - ${CLAUDE_DIR:-~/.claude}:/claude
+      - agent-state:/state
+    environment:
+      MEMORY_SERVER_URL: ${MEMORY_SERVER_URL:?}
+      MEMORY_TOKEN: ${MEMORY_TOKEN:?}
+      MEMORY_CLIENT_ID: ${MEMORY_CLIENT_ID:?}
+      MEMORY_SLUG_PREFIX: ${MEMORY_SLUG_PREFIX:?}
+      MEMORY_INTERVAL: ${MEMORY_INTERVAL:-15m}
+    restart: unless-stopped
+    user: "1000:1000"
+
+volumes:
+  agent-state:

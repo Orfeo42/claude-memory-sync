@@ -1,0 +1,24 @@
+services:
+  memory-server:
+    build:
+      context: ../..
+      dockerfile: build/server.Dockerfile
+    volumes:
+      - memory-data:/data
+    environment:
+      MEMORY_TOKEN: ${MEMORY_TOKEN:?}
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  memory-backup:
+    image: alpine/git
+    profiles:
+      - backup
+    volumes:
+      - memory-data:/data
+      - ${MEMORY_BACKUP_SSH_KEY:?}:/root/.ssh/id_ed25519:ro
+    entrypoint: ["git", "-C", "/data", "push", "origin", "storage"]
+
+volumes:
+  memory-data:
