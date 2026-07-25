@@ -1,5 +1,6 @@
 services:
   memory-server:
+    image: ghcr.io/orfeo42/claude-memory-sync-server:latest
     build:
       context: ../..
       dockerfile: build/server.Dockerfile
