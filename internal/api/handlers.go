@@ -4,17 +4,20 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/danielgtaylor/huma/v2"
-
 	"claude-memory-sync/internal/manifest"
 	"claude-memory-sync/internal/store"
+
+	"github.com/danielgtaylor/huma/v2"
 )
 
-const clientsNamespacePrefix = "clients/"
-const canonicalNamespace = "canonical"
-const octetStreamContentType = "application/octet-stream"
-const unlimitedBodyBytes = -1
-const unlimitedBodyReadTimeout = -1
+const (
+	clientsNamespacePrefix   = "clients/"
+	canonicalNamespace       = "canonical"
+	octetStreamContentType   = "application/octet-stream"
+	unlimitedBodyBytes       = -1
+	unlimitedBodyReadTimeout = -1
+	clientFilePath           = "/v1/clients/{id}/file/{path...}"
+)
 
 type emptyInput struct{}
 
@@ -65,13 +68,13 @@ func registerOperations(api huma.API, s store.Store) {
 	huma.Register(api, huma.Operation{
 		OperationID: "get-client-file",
 		Method:      http.MethodGet,
-		Path:        "/v1/clients/{id}/file/{path...}",
+		Path:        clientFilePath,
 	}, handleClientFileGet(s))
 
 	huma.Register(api, huma.Operation{
 		OperationID:     "put-client-file",
 		Method:          http.MethodPut,
-		Path:            "/v1/clients/{id}/file/{path...}",
+		Path:            clientFilePath,
 		MaxBodyBytes:    unlimitedBodyBytes,
 		BodyReadTimeout: unlimitedBodyReadTimeout,
 	}, handleClientFilePut(s))
@@ -79,7 +82,7 @@ func registerOperations(api huma.API, s store.Store) {
 	huma.Register(api, huma.Operation{
 		OperationID: "delete-client-file",
 		Method:      http.MethodDelete,
-		Path:        "/v1/clients/{id}/file/{path...}",
+		Path:        clientFilePath,
 	}, handleClientFileDelete(s))
 
 	huma.Register(api, huma.Operation{
@@ -100,12 +103,12 @@ func handleHealthz(_ context.Context, _ *emptyInput) (*emptyOutput, error) {
 }
 
 func handleClientTree(s store.Store) func(context.Context, *clientIDInput) (*treeOutput, error) {
-	return func(_ context.Context, input *clientIDInput) (*treeOutput, error) {
+	return func(ctx context.Context, input *clientIDInput) (*treeOutput, error) {
 		if !validClientID(input.ID) {
 			return nil, huma.Error400BadRequest("invalid client id")
 		}
 
-		tree, err := s.Tree(clientsNamespacePrefix + input.ID)
+		tree, err := s.Tree(ctx, clientsNamespacePrefix+input.ID)
 		if err != nil {
 			return nil, mapStoreError(err)
 		}
@@ -115,12 +118,12 @@ func handleClientTree(s store.Store) func(context.Context, *clientIDInput) (*tre
 }
 
 func handleClientFileGet(s store.Store) func(context.Context, *clientFileInput) (*fileOutput, error) {
-	return func(_ context.Context, input *clientFileInput) (*fileOutput, error) {
+	return func(ctx context.Context, input *clientFileInput) (*fileOutput, error) {
 		if !validClientID(input.ID) {
 			return nil, huma.Error400BadRequest("invalid client id")
 		}
 
-		content, err := s.Read(clientsNamespacePrefix+input.ID, input.Path)
+		content, err := s.Read(ctx, clientsNamespacePrefix+input.ID, input.Path)
 		if err != nil {
 			return nil, mapStoreError(err)
 		}
@@ -130,12 +133,12 @@ func handleClientFileGet(s store.Store) func(context.Context, *clientFileInput) 
 }
 
 func handleClientFilePut(s store.Store) func(context.Context, *clientFilePutInput) (*emptyOutput, error) {
-	return func(_ context.Context, input *clientFilePutInput) (*emptyOutput, error) {
+	return func(ctx context.Context, input *clientFilePutInput) (*emptyOutput, error) {
 		if !validClientID(input.ID) {
 			return nil, huma.Error400BadRequest("invalid client id")
 		}
 
-		if err := s.Write(clientsNamespacePrefix+input.ID, input.Path, input.RawBody, input.ID); err != nil {
+		if err := s.Write(ctx, clientsNamespacePrefix+input.ID, input.Path, input.RawBody, input.ID); err != nil {
 			return nil, mapStoreError(err)
 		}
 
@@ -144,12 +147,12 @@ func handleClientFilePut(s store.Store) func(context.Context, *clientFilePutInpu
 }
 
 func handleClientFileDelete(s store.Store) func(context.Context, *clientFileInput) (*emptyOutput, error) {
-	return func(_ context.Context, input *clientFileInput) (*emptyOutput, error) {
+	return func(ctx context.Context, input *clientFileInput) (*emptyOutput, error) {
 		if !validClientID(input.ID) {
 			return nil, huma.Error400BadRequest("invalid client id")
 		}
 
-		if err := s.Delete(clientsNamespacePrefix+input.ID, input.Path, input.ID); err != nil {
+		if err := s.Delete(ctx, clientsNamespacePrefix+input.ID, input.Path, input.ID); err != nil {
 			return nil, mapStoreError(err)
 		}
 
@@ -158,8 +161,8 @@ func handleClientFileDelete(s store.Store) func(context.Context, *clientFileInpu
 }
 
 func handleCanonicalTree(s store.Store) func(context.Context, *emptyInput) (*treeOutput, error) {
-	return func(_ context.Context, _ *emptyInput) (*treeOutput, error) {
-		tree, err := s.Tree(canonicalNamespace)
+	return func(ctx context.Context, _ *emptyInput) (*treeOutput, error) {
+		tree, err := s.Tree(ctx, canonicalNamespace)
 		if err != nil {
 			return nil, mapStoreError(err)
 		}
@@ -169,8 +172,8 @@ func handleCanonicalTree(s store.Store) func(context.Context, *emptyInput) (*tre
 }
 
 func handleCanonicalFileGet(s store.Store) func(context.Context, *canonicalFileInput) (*fileOutput, error) {
-	return func(_ context.Context, input *canonicalFileInput) (*fileOutput, error) {
-		content, err := s.Read(canonicalNamespace, input.Path)
+	return func(ctx context.Context, input *canonicalFileInput) (*fileOutput, error) {
+		content, err := s.Read(ctx, canonicalNamespace, input.Path)
 		if err != nil {
 			return nil, mapStoreError(err)
 		}

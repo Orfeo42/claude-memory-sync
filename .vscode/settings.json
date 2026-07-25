@@ -1,0 +1,16 @@
+{
+  "editor.formatOnSave": true,
+  "[go]": {
+    "editor.defaultFormatter": "golang.go",
+    "editor.codeActionsOnSave": {
+      "source.organizeImports": "explicit"
+    }
+  },
+  "gopls": {
+    "formatting.gofumpt": true,
+    "formatting.local": "claude-memory-sync"
+  },
+  "go.lintOnSave": "package",
+  "go.lintTool": "golangci-lint-v2",
+  "go.lintFlags": ["--fix"]
+}

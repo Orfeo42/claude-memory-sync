@@ -4,9 +4,9 @@ import (
 	"errors"
 	"log/slog"
 
-	"github.com/danielgtaylor/huma/v2"
-
 	"claude-memory-sync/internal/store"
+
+	"github.com/danielgtaylor/huma/v2"
 )
 
 func mapStoreError(err error) error {

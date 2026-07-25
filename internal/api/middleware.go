@@ -1,14 +1,17 @@
 package api
 
 import (
+	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 )
 
-const healthzPath = "/v1/healthz"
-const bearerPrefix = "Bearer "
+const (
+	healthzPath  = "/v1/healthz"
+	bearerPrefix = "Bearer "
+)
 
 func authMiddleware(api huma.API, token string) func(huma.Context, func(huma.Context)) {
 	return func(ctx huma.Context, next func(huma.Context)) {
@@ -19,7 +22,9 @@ func authMiddleware(api huma.API, token string) func(huma.Context, func(huma.Con
 
 		header := ctx.Header("Authorization")
 		if !strings.HasPrefix(header, bearerPrefix) || header[len(bearerPrefix):] != token {
-			huma.WriteErr(api, ctx, http.StatusUnauthorized, "unauthorized")
+			if err := huma.WriteErr(api, ctx, http.StatusUnauthorized, "unauthorized"); err != nil {
+				slog.WarnContext(ctx.Context(), "failed to write error response", slog.String("error", err.Error()))
+			}
 			return
 		}
 

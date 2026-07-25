@@ -1,3 +1,4 @@
 .stfolder
 *.sync-conflict-*
 .obsidian/
+.claude/

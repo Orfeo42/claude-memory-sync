@@ -5,6 +5,7 @@ package store
 
 import (
 	"claude-memory-sync/internal/manifest"
+	"context"
 	"sync"
 )
 
@@ -18,16 +19,16 @@ var _ Store = &MockStore{}
 //
 //		// make and configure a mocked Store
 //		mockedStore := &MockStore{
-//			DeleteFunc: func(namespace string, path string, clientID string) error {
+//			DeleteFunc: func(ctx context.Context, namespace string, path string, clientID string) error {
 //				panic("mock out the Delete method")
 //			},
-//			ReadFunc: func(namespace string, path string) ([]byte, error) {
+//			ReadFunc: func(ctx context.Context, namespace string, path string) ([]byte, error) {
 //				panic("mock out the Read method")
 //			},
-//			TreeFunc: func(namespace string) (manifest.Manifest, error) {
+//			TreeFunc: func(ctx context.Context, namespace string) (manifest.Manifest, error) {
 //				panic("mock out the Tree method")
 //			},
-//			WriteFunc: func(namespace string, path string, content []byte, clientID string) error {
+//			WriteFunc: func(ctx context.Context, namespace string, path string, content []byte, clientID string) error {
 //				panic("mock out the Write method")
 //			},
 //		}
@@ -38,21 +39,23 @@ var _ Store = &MockStore{}
 //	}
 type MockStore struct {
 	// DeleteFunc mocks the Delete method.
-	DeleteFunc func(namespace string, path string, clientID string) error
+	DeleteFunc func(ctx context.Context, namespace string, path string, clientID string) error
 
 	// ReadFunc mocks the Read method.
-	ReadFunc func(namespace string, path string) ([]byte, error)
+	ReadFunc func(ctx context.Context, namespace string, path string) ([]byte, error)
 
 	// TreeFunc mocks the Tree method.
-	TreeFunc func(namespace string) (manifest.Manifest, error)
+	TreeFunc func(ctx context.Context, namespace string) (manifest.Manifest, error)
 
 	// WriteFunc mocks the Write method.
-	WriteFunc func(namespace string, path string, content []byte, clientID string) error
+	WriteFunc func(ctx context.Context, namespace string, path string, content []byte, clientID string) error
 
 	// calls tracks calls to the methods.
 	calls struct {
 		// Delete holds details about calls to the Delete method.
 		Delete []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
 			// Namespace is the namespace argument value.
 			Namespace string
 			// Path is the path argument value.
@@ -62,6 +65,8 @@ type MockStore struct {
 		}
 		// Read holds details about calls to the Read method.
 		Read []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
 			// Namespace is the namespace argument value.
 			Namespace string
 			// Path is the path argument value.
@@ -69,11 +74,15 @@ type MockStore struct {
 		}
 		// Tree holds details about calls to the Tree method.
 		Tree []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
 			// Namespace is the namespace argument value.
 			Namespace string
 		}
 		// Write holds details about calls to the Write method.
 		Write []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
 			// Namespace is the namespace argument value.
 			Namespace string
 			// Path is the path argument value.
@@ -91,15 +100,17 @@ type MockStore struct {
 }
 
 // Delete calls DeleteFunc.
-func (mock *MockStore) Delete(namespace string, path string, clientID string) error {
+func (mock *MockStore) Delete(ctx context.Context, namespace string, path string, clientID string) error {
 	if mock.DeleteFunc == nil {
 		panic("MockStore.DeleteFunc: method is nil but Store.Delete was just called")
 	}
 	callInfo := struct {
+		Ctx       context.Context
 		Namespace string
 		Path      string
 		ClientID  string
 	}{
+		Ctx:       ctx,
 		Namespace: namespace,
 		Path:      path,
 		ClientID:  clientID,
@@ -107,7 +118,7 @@ func (mock *MockStore) Delete(namespace string, path string, clientID string) er
 	mock.lockDelete.Lock()
 	mock.calls.Delete = append(mock.calls.Delete, callInfo)
 	mock.lockDelete.Unlock()
-	return mock.DeleteFunc(namespace, path, clientID)
+	return mock.DeleteFunc(ctx, namespace, path, clientID)
 }
 
 // DeleteCalls gets all the calls that were made to Delete.
@@ -115,11 +126,13 @@ func (mock *MockStore) Delete(namespace string, path string, clientID string) er
 //
 //	len(mockedStore.DeleteCalls())
 func (mock *MockStore) DeleteCalls() []struct {
+	Ctx       context.Context
 	Namespace string
 	Path      string
 	ClientID  string
 } {
 	var calls []struct {
+		Ctx       context.Context
 		Namespace string
 		Path      string
 		ClientID  string
@@ -131,21 +144,23 @@ func (mock *MockStore) DeleteCalls() []struct {
 }
 
 // Read calls ReadFunc.
-func (mock *MockStore) Read(namespace string, path string) ([]byte, error) {
+func (mock *MockStore) Read(ctx context.Context, namespace string, path string) ([]byte, error) {
 	if mock.ReadFunc == nil {
 		panic("MockStore.ReadFunc: method is nil but Store.Read was just called")
 	}
 	callInfo := struct {
+		Ctx       context.Context
 		Namespace string
 		Path      string
 	}{
+		Ctx:       ctx,
 		Namespace: namespace,
 		Path:      path,
 	}
 	mock.lockRead.Lock()
 	mock.calls.Read = append(mock.calls.Read, callInfo)
 	mock.lockRead.Unlock()
-	return mock.ReadFunc(namespace, path)
+	return mock.ReadFunc(ctx, namespace, path)
 }
 
 // ReadCalls gets all the calls that were made to Read.
@@ -153,10 +168,12 @@ func (mock *MockStore) Read(namespace string, path string) ([]byte, error) {
 //
 //	len(mockedStore.ReadCalls())
 func (mock *MockStore) ReadCalls() []struct {
+	Ctx       context.Context
 	Namespace string
 	Path      string
 } {
 	var calls []struct {
+		Ctx       context.Context
 		Namespace string
 		Path      string
 	}
@@ -167,19 +184,21 @@ func (mock *MockStore) ReadCalls() []struct {
 }
 
 // Tree calls TreeFunc.
-func (mock *MockStore) Tree(namespace string) (manifest.Manifest, error) {
+func (mock *MockStore) Tree(ctx context.Context, namespace string) (manifest.Manifest, error) {
 	if mock.TreeFunc == nil {
 		panic("MockStore.TreeFunc: method is nil but Store.Tree was just called")
 	}
 	callInfo := struct {
+		Ctx       context.Context
 		Namespace string
 	}{
+		Ctx:       ctx,
 		Namespace: namespace,
 	}
 	mock.lockTree.Lock()
 	mock.calls.Tree = append(mock.calls.Tree, callInfo)
 	mock.lockTree.Unlock()
-	return mock.TreeFunc(namespace)
+	return mock.TreeFunc(ctx, namespace)
 }
 
 // TreeCalls gets all the calls that were made to Tree.
@@ -187,9 +206,11 @@ func (mock *MockStore) Tree(namespace string) (manifest.Manifest, error) {
 //
 //	len(mockedStore.TreeCalls())
 func (mock *MockStore) TreeCalls() []struct {
+	Ctx       context.Context
 	Namespace string
 } {
 	var calls []struct {
+		Ctx       context.Context
 		Namespace string
 	}
 	mock.lockTree.RLock()
@@ -199,16 +220,18 @@ func (mock *MockStore) TreeCalls() []struct {
 }
 
 // Write calls WriteFunc.
-func (mock *MockStore) Write(namespace string, path string, content []byte, clientID string) error {
+func (mock *MockStore) Write(ctx context.Context, namespace string, path string, content []byte, clientID string) error {
 	if mock.WriteFunc == nil {
 		panic("MockStore.WriteFunc: method is nil but Store.Write was just called")
 	}
 	callInfo := struct {
+		Ctx       context.Context
 		Namespace string
 		Path      string
 		Content   []byte
 		ClientID  string
 	}{
+		Ctx:       ctx,
 		Namespace: namespace,
 		Path:      path,
 		Content:   content,
@@ -217,7 +240,7 @@ func (mock *MockStore) Write(namespace string, path string, content []byte, clie
 	mock.lockWrite.Lock()
 	mock.calls.Write = append(mock.calls.Write, callInfo)
 	mock.lockWrite.Unlock()
-	return mock.WriteFunc(namespace, path, content, clientID)
+	return mock.WriteFunc(ctx, namespace, path, content, clientID)
 }
 
 // WriteCalls gets all the calls that were made to Write.
@@ -225,12 +248,14 @@ func (mock *MockStore) Write(namespace string, path string, content []byte, clie
 //
 //	len(mockedStore.WriteCalls())
 func (mock *MockStore) WriteCalls() []struct {
+	Ctx       context.Context
 	Namespace string
 	Path      string
 	Content   []byte
 	ClientID  string
 } {
 	var calls []struct {
+		Ctx       context.Context
 		Namespace string
 		Path      string
 		Content   []byte
