@@ -16,22 +16,22 @@ Multi-step effort, not a one-shot build. Status per phase below.
 
 ## Phases
 
-| Phase | Doc                                                                               | Status                                    |
-| ----- | --------------------------------------------------------------------------------- | ----------------------------------------- |
-| 0     | [.docs/00-repo-and-scaffold.md](docs/00-repo-and-scaffold.md)                     | Done (2026-07-19)                         |
-| 1     | [.docs/01-hub-sync.md](docs/01-hub-sync.md)                                       | Implemented + e2e green — rollout pending |
-| 2     | [.docs/02-plugin-harness-sharing.md](docs/02-plugin-harness-sharing.md)           | Future — context captured, not planned    |
-| 3     | [.docs/03-condense-dedup.md](docs/03-condense-dedup.md)                           | Future — context captured, not planned    |
-| 4     | [.docs/04-usage-mining-rules.md](docs/04-usage-mining-rules.md)                   | Future — context captured, not planned    |
-| 5     | [.docs/05-hot-cache-rollup.md](docs/05-hot-cache-rollup.md)                       | Future — context captured, not planned    |
-| 6     | [.docs/06-transcript-knowledge-mining.md](docs/06-transcript-knowledge-mining.md) | Future — context captured, not planned    |
+| Phase | Doc                                                                                | Status                                    |
+| ----- | ---------------------------------------------------------------------------------- | ----------------------------------------- |
+| 0     | [.docs/00-repo-and-scaffold.md](.docs/00-repo-and-scaffold.md)                     | Done (2026-07-19)                         |
+| 1     | [.docs/01-hub-sync.md](.docs/01-hub-sync.md)                                       | Implemented + e2e green — rollout pending |
+| 2     | [.docs/02-plugin-harness-sharing.md](.docs/02-plugin-harness-sharing.md)           | Future — context captured, not planned    |
+| 3     | [.docs/03-condense-dedup.md](.docs/03-condense-dedup.md)                           | Future — context captured, not planned    |
+| 4     | [.docs/04-usage-mining-rules.md](.docs/04-usage-mining-rules.md)                   | Future — context captured, not planned    |
+| 5     | [.docs/05-hot-cache-rollup.md](.docs/05-hot-cache-rollup.md)                       | Future — context captured, not planned    |
+| 6     | [.docs/06-transcript-knowledge-mining.md](.docs/06-transcript-knowledge-mining.md) | Future — context captured, not planned    |
 
 ## Ground rules (apply to every phase)
 
 - Hub-based, containerized: sync goes through the home-box API server;
   the only per-machine dependency is Docker. GitHub is never the sync
   path — backup pushes happen server-side only. (Replaced the original
-  "local-first P2P" rule, 2026-07-19 — see docs/01.)
+  "local-first P2P" rule, 2026-07-19 — see .docs/01.)
 - Whitelist, not blacklist: only explicitly-listed paths ever leave
   `~/.claude`. A future Claude Code update adding new sensitive files under
   `~/.claude` must not silently get swept into sync.
@@ -40,7 +40,7 @@ Multi-step effort, not a one-shot build. Status per phase below.
   `jobs/`, `tasks/`, `file-history/`.
 - Condense/dedup (phases 3/5) may auto-apply, with git as the safety
   net: one commit per logical change, reviewable/revertable after the
-  fact (post-hoc audit — decided 2026-07-19, see docs/05).
+  fact (post-hoc audit — decided 2026-07-19, see .docs/05).
   Rule-generation (phase 4) still requires explicit human pre-approval —
   never auto-applied.
 - Machine count/list is intentionally open-ended (1..n) — nothing here
