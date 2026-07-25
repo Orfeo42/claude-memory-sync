@@ -3,14 +3,16 @@ package api
 import (
 	"net/http"
 
+	"claude-memory-sync/internal/store"
+
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
-
-	"claude-memory-sync/internal/store"
 )
 
-const apiTitle = "memory-sync"
-const apiVersion = "1.0.0"
+const (
+	apiTitle   = "memory-sync"
+	apiVersion = "1.0.0"
+)
 
 func New(s store.Store, token string) http.Handler {
 	mux := http.NewServeMux()

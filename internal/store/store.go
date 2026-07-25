@@ -3,6 +3,7 @@ package store
 //go:generate moq -out store_mock.go . Store:MockStore
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -22,44 +23,31 @@ const (
 )
 
 type Store interface {
-	Tree(namespace string) (manifest.Manifest, error)
-	Read(namespace, path string) ([]byte, error)
-	Write(namespace, path string, content []byte, clientID string) error
-	Delete(namespace, path string, clientID string) error
+	Tree(ctx context.Context, namespace string) (manifest.Manifest, error)
+	Read(ctx context.Context, namespace, path string) ([]byte, error)
+	Write(ctx context.Context, namespace, path string, content []byte, clientID string) error
+	Delete(ctx context.Context, namespace, path string, clientID string) error
 }
 
 type gitStore struct {
 	root string
 }
 
-func New(root string) (Store, error) {
+func New(ctx context.Context, root string) (Store, error) {
 	s := &gitStore{root: root}
-	if err := s.init(); err != nil {
+	if err := s.init(ctx); err != nil {
 		return nil, fmt.Errorf("init store: %w", err)
 	}
 	return s, nil
 }
 
-func (s *gitStore) init() error {
-	if err := os.MkdirAll(s.root, 0o755); err != nil {
+func (s *gitStore) init(ctx context.Context) error {
+	if err := os.MkdirAll(s.root, 0o750); err != nil {
 		return fmt.Errorf("create root dir: %w", err)
 	}
 
-	isRepo := true
-	if _, err := os.Stat(filepath.Join(s.root, ".git")); os.IsNotExist(err) {
-		isRepo = false
-	}
-
-	if !isRepo {
-		if _, err := runGit(s.root, "init", "--initial-branch="+gitBranch); err != nil {
-			return fmt.Errorf("git init: %w", err)
-		}
-		if _, err := runGit(s.root, "config", "--local", "user.name", gitUserName); err != nil {
-			return fmt.Errorf("git config user.name: %w", err)
-		}
-		if _, err := runGit(s.root, "config", "--local", "user.email", gitUserEmail); err != nil {
-			return fmt.Errorf("git config user.email: %w", err)
-		}
+	if err := s.ensureRepo(ctx); err != nil {
+		return err
 	}
 
 	if err := ensureDirWithKeep(filepath.Join(s.root, canonicalDir)); err != nil {
@@ -69,30 +57,60 @@ func (s *gitStore) init() error {
 		return fmt.Errorf("ensure clients dir: %w", err)
 	}
 
-	if _, err := runGit(s.root, "add", "-A"); err != nil {
+	if err := s.commitAll(ctx, "init: memory-server storage"); err != nil {
+		return err
+	}
+
+	slog.InfoContext(ctx, "store initialized", slog.String("root", s.root))
+	return nil
+}
+
+func (s *gitStore) ensureRepo(ctx context.Context) error {
+	isRepo := true
+	if _, err := os.Stat(filepath.Join(s.root, ".git")); os.IsNotExist(err) {
+		isRepo = false
+	}
+
+	if isRepo {
+		return nil
+	}
+
+	if err := runGit(ctx, s.root, "init", "--initial-branch="+gitBranch); err != nil {
+		return fmt.Errorf("git init: %w", err)
+	}
+	if err := runGit(ctx, s.root, "config", "--local", "user.name", gitUserName); err != nil {
+		return fmt.Errorf("git config user.name: %w", err)
+	}
+	if err := runGit(ctx, s.root, "config", "--local", "user.email", gitUserEmail); err != nil {
+		return fmt.Errorf("git config user.email: %w", err)
+	}
+	return nil
+}
+
+func (s *gitStore) commitAll(ctx context.Context, message string) error {
+	if err := runGit(ctx, s.root, "add", "-A"); err != nil {
 		return fmt.Errorf("git add: %w", err)
 	}
-	hasChanges, err := gitHasStagedChanges(s.root)
+	hasChanges, err := gitHasStagedChanges(ctx, s.root)
 	if err != nil {
 		return fmt.Errorf("check staged changes: %w", err)
 	}
-	if hasChanges {
-		if _, err := runGit(s.root, "commit", "-m", "init: memory-server storage"); err != nil {
-			return fmt.Errorf("git commit init: %w", err)
-		}
+	if !hasChanges {
+		return nil
 	}
-
-	slog.Info("store initialized", slog.String("root", s.root))
+	if err := runGit(ctx, s.root, "commit", "-m", message); err != nil {
+		return fmt.Errorf("git commit: %w", err)
+	}
 	return nil
 }
 
 func ensureDirWithKeep(dir string) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("mkdir %s: %w", dir, err)
 	}
 	keep := filepath.Join(dir, gitKeepFile)
 	if _, err := os.Stat(keep); os.IsNotExist(err) {
-		if err := os.WriteFile(keep, nil, 0o644); err != nil {
+		if err := os.WriteFile(keep, nil, 0o600); err != nil {
 			return fmt.Errorf("write %s: %w", keep, err)
 		}
 	}
@@ -147,13 +165,13 @@ func (s *gitStore) resolve(namespace, path string) (string, string, error) {
 	return filepath.Join(nsDir, filepath.FromSlash(path)), relPath, nil
 }
 
-func (s *gitStore) Tree(namespace string) (manifest.Manifest, error) {
+func (s *gitStore) Tree(_ context.Context, namespace string) (manifest.Manifest, error) {
 	nsDir, err := s.namespaceDir(namespace)
 	if err != nil {
 		return nil, err
 	}
 
-	whitelist := func(relPath string, d os.DirEntry) bool {
+	whitelist := func(_ string, d os.DirEntry) bool {
 		return !strings.HasPrefix(d.Name(), ".")
 	}
 
@@ -164,7 +182,7 @@ func (s *gitStore) Tree(namespace string) (manifest.Manifest, error) {
 	return m, nil
 }
 
-func (s *gitStore) Read(namespace, path string) ([]byte, error) {
+func (s *gitStore) Read(_ context.Context, namespace, path string) ([]byte, error) {
 	target, _, err := s.resolve(namespace, path)
 	if err != nil {
 		return nil, err
@@ -180,32 +198,33 @@ func (s *gitStore) Read(namespace, path string) ([]byte, error) {
 	return content, nil
 }
 
-func (s *gitStore) Write(namespace, path string, content []byte, clientID string) error {
+func (s *gitStore) Write(ctx context.Context, namespace, path string, content []byte, clientID string) error {
 	target, relPath, err := s.resolve(namespace, path)
 	if err != nil {
 		return err
 	}
 
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
 		return fmt.Errorf("create parent dir: %w", err)
 	}
-	if err := os.WriteFile(target, content, 0o644); err != nil {
+	if err := os.WriteFile(target, content, 0o600); err != nil {
 		return fmt.Errorf("write file: %w", err)
 	}
 
-	if err := s.commit(relPath, clientID, namespace, path); err != nil {
+	if err := s.commit(ctx, relPath, clientID, namespace, path); err != nil {
 		return err
 	}
 
-	slog.Info("wrote file",
+	slog.InfoContext(
+		ctx, "wrote file",
 		slog.String("namespace", namespace),
 		slog.String("path", path),
-		slog.String("clientId", clientID),
+		slog.String("client_id", clientID),
 	)
 	return nil
 }
 
-func (s *gitStore) Delete(namespace, path string, clientID string) error {
+func (s *gitStore) Delete(ctx context.Context, namespace, path string, clientID string) error {
 	target, relPath, err := s.resolve(namespace, path)
 	if err != nil {
 		return err
@@ -215,35 +234,36 @@ func (s *gitStore) Delete(namespace, path string, clientID string) error {
 		return nil
 	}
 
-	if _, err := runGit(s.root, "rm", "-f", "--", relPath); err != nil {
+	if err := runGit(ctx, s.root, "rm", "-f", "--", relPath); err != nil {
 		return fmt.Errorf("git rm: %w", err)
 	}
 
-	hasChanges, err := gitHasStagedChanges(s.root)
+	hasChanges, err := gitHasStagedChanges(ctx, s.root)
 	if err != nil {
 		return fmt.Errorf("check staged changes: %w", err)
 	}
 	if hasChanges {
 		msg := fmt.Sprintf("sync: %s %s/%s", clientID, namespace, path)
-		if _, err := runGit(s.root, "commit", "-m", msg); err != nil {
+		if err := runGit(ctx, s.root, "commit", "-m", msg); err != nil {
 			return fmt.Errorf("git commit: %w", err)
 		}
 	}
 
-	slog.Info("deleted file",
+	slog.InfoContext(
+		ctx, "deleted file",
 		slog.String("namespace", namespace),
 		slog.String("path", path),
-		slog.String("clientId", clientID),
+		slog.String("client_id", clientID),
 	)
 	return nil
 }
 
-func (s *gitStore) commit(relPath, clientID, namespace, path string) error {
-	if _, err := runGit(s.root, "add", "--", relPath); err != nil {
+func (s *gitStore) commit(ctx context.Context, relPath, clientID, namespace, path string) error {
+	if err := runGit(ctx, s.root, "add", "--", relPath); err != nil {
 		return fmt.Errorf("git add: %w", err)
 	}
 
-	hasChanges, err := gitHasStagedChanges(s.root)
+	hasChanges, err := gitHasStagedChanges(ctx, s.root)
 	if err != nil {
 		return fmt.Errorf("check staged changes: %w", err)
 	}
@@ -252,7 +272,7 @@ func (s *gitStore) commit(relPath, clientID, namespace, path string) error {
 	}
 
 	msg := fmt.Sprintf("sync: %s %s/%s", clientID, namespace, path)
-	if _, err := runGit(s.root, "commit", "-m", msg); err != nil {
+	if err := runGit(ctx, s.root, "commit", "-m", msg); err != nil {
 		return fmt.Errorf("git commit: %w", err)
 	}
 	return nil

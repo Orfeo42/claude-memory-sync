@@ -61,12 +61,13 @@ func (a *Agent) upSync(ctx context.Context, local manifest.Manifest, localPaths 
 			if putErr := a.client.PutClientFile(ctx, path, content); putErr != nil {
 				return fmt.Errorf("put client file %s: %w", path, putErr)
 			}
-			slog.Info("up-synced changed file", slog.String("path", path))
+			slog.InfoContext(ctx, "up-synced changed file", slog.String("path", path))
 		case manifest.LocalDelete:
 			if delErr := a.client.DeleteClientFile(ctx, path); delErr != nil {
 				return fmt.Errorf("delete client file %s: %w", path, delErr)
 			}
-			slog.Info("up-synced deleted file", slog.String("path", path))
+			slog.InfoContext(ctx, "up-synced deleted file", slog.String("path", path))
+		default:
 		}
 	}
 
@@ -96,7 +97,8 @@ func (a *Agent) downSync(ctx context.Context, local manifest.Manifest) error {
 				return delErr
 			}
 		case manifest.BothChanged:
-			slog.Warn("local wins, skipping canonical update", slog.String("path", path))
+			slog.WarnContext(ctx, "local wins, skipping canonical update", slog.String("path", path))
+		default:
 		}
 	}
 
@@ -106,7 +108,7 @@ func (a *Agent) downSync(ctx context.Context, local manifest.Manifest) error {
 func (a *Agent) applyRemoteFile(ctx context.Context, path string) error {
 	target, err := localPath(path, a.cfg.ClaudeDir, a.cfg.SlugPrefix)
 	if err != nil {
-		slog.Warn("skipping canonical file with unmappable path",
+		slog.WarnContext(ctx, "skipping canonical file with unmappable path",
 			slog.String("path", path),
 			slog.String("error", err.Error()),
 		)
@@ -118,14 +120,14 @@ func (a *Agent) applyRemoteFile(ctx context.Context, path string) error {
 		return fmt.Errorf("get canonical file %s: %w", path, err)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
 		return fmt.Errorf("create parent dir for %s: %w", target, err)
 	}
-	if err := os.WriteFile(target, content, 0o644); err != nil {
+	if err := os.WriteFile(target, content, 0o600); err != nil {
 		return fmt.Errorf("write local file %s: %w", target, err)
 	}
 
-	slog.Info("down-synced changed file", slog.String("path", path))
+	slog.InfoContext(ctx, "down-synced changed file", slog.String("path", path))
 	return nil
 }
 
