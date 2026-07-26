@@ -5,11 +5,18 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 
 	"claude-memory-sync/internal/manifest"
 )
+
+func mergeScan(result manifest.Manifest, paths map[string]string, entries manifest.Manifest, entryPaths map[string]string) manifest.Manifest {
+	result = append(result, entries...)
+	maps.Copy(paths, entryPaths)
+	return result
+}
 
 func scanLocal(claudeDir, slugPrefix string) (manifest.Manifest, map[string]string, error) {
 	result := manifest.Manifest{}
@@ -28,19 +35,25 @@ func scanLocal(claudeDir, slugPrefix string) (manifest.Manifest, map[string]stri
 	if err != nil {
 		return nil, nil, err
 	}
-	result = append(result, ruleEntries...)
-	for path, fsPath := range rulePaths {
-		paths[path] = fsPath
+	result = mergeScan(result, paths, ruleEntries, rulePaths)
+
+	skillEntries, skillPaths, err := scanGlobalTree(claudeDir, "skills", "global/skills/")
+	if err != nil {
+		return nil, nil, err
 	}
+	result = mergeScan(result, paths, skillEntries, skillPaths)
+
+	agentEntries, agentPaths, err := scanGlobalTree(claudeDir, "agents", "global/agents/")
+	if err != nil {
+		return nil, nil, err
+	}
+	result = mergeScan(result, paths, agentEntries, agentPaths)
 
 	projectEntries, projectPaths, err := scanProjects(claudeDir, slugPrefix)
 	if err != nil {
 		return nil, nil, err
 	}
-	result = append(result, projectEntries...)
-	for path, fsPath := range projectPaths {
-		paths[path] = fsPath
-	}
+	result = mergeScan(result, paths, projectEntries, projectPaths)
 
 	return result, paths, nil
 }
@@ -133,6 +146,37 @@ func scanRuleFile(rulesDir, name string) (*ruleFile, error) {
 
 	nsPath := "global/rules/" + name
 	return &ruleFile{entry: manifest.Entry{Path: nsPath, SHA256: sum, Size: fileInfo.Size()}, fsPath: filePath}, nil
+}
+
+func scanGlobalTree(claudeDir, dirName, nsPrefix string) (manifest.Manifest, map[string]string, error) {
+	dir := filepath.Join(claudeDir, dirName)
+
+	dirInfo, err := os.Lstat(dir)
+	if os.IsNotExist(err) {
+		return nil, nil, nil
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("lstat %s: %w", dir, err)
+	}
+	if dirInfo.Mode()&os.ModeSymlink != 0 {
+		slog.Warn("skipping symlinked dir, machine not yet migrated", slog.String("path", dir))
+		return nil, nil, nil
+	}
+
+	treeManifest, buildErr := manifest.Build(dir, func(string, fs.DirEntry) bool { return true })
+	if buildErr != nil {
+		return nil, nil, fmt.Errorf("scan %s: %w", dir, buildErr)
+	}
+
+	result := manifest.Manifest{}
+	paths := map[string]string{}
+	for _, entry := range treeManifest {
+		nsPath := nsPrefix + entry.Path
+		result = append(result, manifest.Entry{Path: nsPath, SHA256: entry.SHA256, Size: entry.Size})
+		paths[nsPath] = filepath.Join(dir, filepath.FromSlash(entry.Path))
+	}
+
+	return result, paths, nil
 }
 
 func scanProjects(claudeDir, slugPrefix string) (manifest.Manifest, map[string]string, error) {
