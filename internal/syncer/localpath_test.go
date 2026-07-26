@@ -21,6 +21,28 @@ func TestLocalPath(t *testing.T) {
 		assert.Equal(t, filepath.Join("/claude", "rules", "go.md"), got)
 	})
 
+	t.Run("maps global skills file", func(t *testing.T) {
+		got, err := localPath("global/skills/pr-description/SKILL.md", "/claude", "-home-orfeo42")
+		require.NoError(t, err)
+		assert.Equal(t, filepath.Join("/claude", "skills", "pr-description", "SKILL.md"), got)
+	})
+
+	t.Run("maps global agents file", func(t *testing.T) {
+		got, err := localPath("global/agents/implementer.md", "/claude", "-home-orfeo42")
+		require.NoError(t, err)
+		assert.Equal(t, filepath.Join("/claude", "agents", "implementer.md"), got)
+	})
+
+	t.Run("errors on empty global skills path", func(t *testing.T) {
+		_, err := localPath("global/skills/", "/claude", "-home-orfeo42")
+		require.ErrorIs(t, err, errInvalidNamespacePath)
+	})
+
+	t.Run("errors on empty global agents path", func(t *testing.T) {
+		_, err := localPath("global/agents/", "/claude", "-home-orfeo42")
+		require.ErrorIs(t, err, errInvalidNamespacePath)
+	})
+
 	t.Run("maps HOME project memory file back to slug prefix", func(t *testing.T) {
 		got, err := localPath("projects/HOME/memory/notes.md", "/claude", "-home-orfeo42")
 		require.NoError(t, err)

@@ -8,17 +8,27 @@ import (
 
 const globalClaudeMDPath = "global/CLAUDE.md"
 
+func globalSubdirPath(nsPath, prefix, claudeDir, subDir string) (string, error) {
+	rest := strings.TrimPrefix(nsPath, prefix)
+	if rest == "" {
+		return "", fmt.Errorf("%w: %s", errInvalidNamespacePath, nsPath)
+	}
+	return filepath.Join(claudeDir, subDir, filepath.FromSlash(rest)), nil
+}
+
 func localPath(nsPath, claudeDir, slugPrefix string) (string, error) {
 	switch {
 	case nsPath == globalClaudeMDPath:
 		return filepath.Join(claudeDir, "CLAUDE.md"), nil
 
 	case strings.HasPrefix(nsPath, "global/rules/"):
-		rest := strings.TrimPrefix(nsPath, "global/rules/")
-		if rest == "" {
-			return "", fmt.Errorf("%w: %s", errInvalidNamespacePath, nsPath)
-		}
-		return filepath.Join(claudeDir, "rules", filepath.FromSlash(rest)), nil
+		return globalSubdirPath(nsPath, "global/rules/", claudeDir, "rules")
+
+	case strings.HasPrefix(nsPath, "global/skills/"):
+		return globalSubdirPath(nsPath, "global/skills/", claudeDir, "skills")
+
+	case strings.HasPrefix(nsPath, "global/agents/"):
+		return globalSubdirPath(nsPath, "global/agents/", claudeDir, "agents")
 
 	case strings.HasPrefix(nsPath, "projects/"):
 		rest := strings.TrimPrefix(nsPath, "projects/")
