@@ -1,7 +1,33 @@
-# Phase 6 — project knowledge mining from session transcripts (future, context only)
+# Phase 6 — project knowledge mining from session transcripts
 
-Not planned yet. This doc exists so a future session can start Phase 6
-without re-deriving the following facts.
+## Status (2026-07-26)
+
+**Implemented as the `memory-mine` skill** (`~/.claude/skills/memory-mine/`,
+syncs via phase 2a — code travels, transcripts and mining state do not):
+
+- `bin/mine-slim` — jq compaction of a transcript: USER/ASSISTANT text
+  only, tool results dropped, 3000 chars/message, 150KB/transcript cap.
+- `bin/mine-project [--dry-run] <slug>` — incremental miner: skips
+  sessions listed in `~/.local/state/memory-mine/<slug>.mined`
+  (machine-local, NOT synced), skips tiny transcripts (<400 bytes
+  slimmed), otherwise one `claude -p` call (model `$MINE_MODEL`,
+  default sonnet) with existing MEMORY.md + file list for dedup,
+  parses `===FILE:`-delimited output (`bin/mine-parse`), scrubs via
+  secret-pattern regexes (reject, never edit), writes accepted entries
+  to `memory/` and appends MEMORY.md index lines.
+- `bin/mine-all [--dry-run]` — backfill driver over all project dirs.
+
+Open questions resolved: transcript schema inspected (`type`
+user/assistant, `.message.content` string or block array); session
+subdirs (`<uuid>/subagents`, `tool-results`) carry implementation
+detail only — v1 mines main transcripts only; scrubbing = prompt rule
++ mechanical regex pass (belt and braces); backfill runs per machine
+on its own local transcripts (local-mining decision, 2026-07-26).
+
+Pilot run (3d-printer project, 1 transcript): produced one high-quality
+entry with wikilink + index line. Full backfill (353 transcripts,
+151MB raw on this machine) pending user go — cost decision.
+Recurring cadence still deferred to phase 5's daily timer.
 
 ## Goal (as stated by user, 2026-07-19)
 

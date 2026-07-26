@@ -1,7 +1,19 @@
-# Phase 3 — condense/dedup (future, context only)
+# Phase 3 — condense/dedup
 
-Not planned yet. This doc exists so a future session can start Phase 3
-without re-deriving the following facts.
+## Status (2026-07-26)
+
+- **Layer A (structural merge) DONE**: `canonical/` is populated by
+  **server-side dual-write** — every `Write`/`Delete` on a
+  `clients/<id>` namespace mirrors the same path under `canonical/` in
+  the same git commit (`internal/store/store.go`, `mirrorPaths`).
+  Last-writer-wins per file; the agent's existing `BothChanged` guard
+  ("local wins, skipping canonical update") covers genuine concurrent
+  conflicts. `manifest.Diff` classifies local/remote entries with equal
+  SHA256 as `Unchanged` so a machine's own mirrored write doesn't echo
+  back as a conflict. Cross-machine sync is live from this point.
+- **Layer B (semantic condense/dedup, LLM)** — still future; runs under
+  phase 5's daily job per the post-hoc audit model. The rest of this
+  doc concerns Layer B.
 
 ## Goal (as stated by user)
 

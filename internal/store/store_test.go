@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -16,6 +17,24 @@ import (
 func gitLog(t *testing.T, root string) string {
 	t.Helper()
 	cmd := exec.Command("git", "-C", root, "log", "--oneline")
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err)
+	return string(out)
+}
+
+func commitCount(t *testing.T, root string) int {
+	t.Helper()
+	cmd := exec.Command("git", "-C", root, "rev-list", "--count", "HEAD")
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err)
+	count, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	require.NoError(t, err)
+	return count
+}
+
+func gitStatusPorcelain(t *testing.T, root string) string {
+	t.Helper()
+	cmd := exec.Command("git", "-C", root, "status", "--porcelain")
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err)
 	return string(out)
@@ -135,6 +154,55 @@ func TestGitStoreWrite(t *testing.T) {
 		err = s.Write(t.Context(), "clients/host-a", "/etc/passwd", []byte("x"), "host-a")
 		require.ErrorIs(t, err, store.ErrInvalidPath)
 	})
+
+	t.Run("mirrors client write to canonical namespace", func(t *testing.T) {
+		root := t.TempDir()
+		s, err := store.New(t.Context(), root)
+		require.NoError(t, err)
+
+		err = s.Write(t.Context(), "clients/host-a", "global/CLAUDE.md", []byte("hello"), "host-a")
+		require.NoError(t, err)
+
+		clientContent, err := os.ReadFile(filepath.Join(root, "clients", "host-a", "global", "CLAUDE.md"))
+		require.NoError(t, err)
+		canonicalContent, err := os.ReadFile(filepath.Join(root, "canonical", "global", "CLAUDE.md"))
+		require.NoError(t, err)
+		assert.Equal(t, "hello", string(clientContent))
+		assert.Equal(t, string(clientContent), string(canonicalContent))
+	})
+
+	t.Run("writing to canonical namespace directly does not create clients files", func(t *testing.T) {
+		root := t.TempDir()
+		s, err := store.New(t.Context(), root)
+		require.NoError(t, err)
+
+		err = s.Write(t.Context(), "canonical", "global/CLAUDE.md", []byte("hello"), "host-a")
+		require.NoError(t, err)
+
+		assert.FileExists(t, filepath.Join(root, "canonical", "global", "CLAUDE.md"))
+		_, statErr := os.Stat(filepath.Join(root, "clients"))
+		require.NoError(t, statErr)
+		entries, err := os.ReadDir(filepath.Join(root, "clients"))
+		require.NoError(t, err)
+		for _, entry := range entries {
+			assert.Equal(t, ".gitkeep", entry.Name())
+		}
+	})
+
+	t.Run("client write with mirror is a single atomic commit", func(t *testing.T) {
+		root := t.TempDir()
+		s, err := store.New(t.Context(), root)
+		require.NoError(t, err)
+
+		countBefore := commitCount(t, root)
+
+		err = s.Write(t.Context(), "clients/host-a", "global/CLAUDE.md", []byte("hello"), "host-a")
+		require.NoError(t, err)
+
+		countAfter := commitCount(t, root)
+		assert.Equal(t, countBefore+1, countAfter)
+		assert.Empty(t, gitStatusPorcelain(t, root))
+	})
 }
 
 func TestGitStoreRead(t *testing.T) {
@@ -188,5 +256,50 @@ func TestGitStoreDelete(t *testing.T) {
 
 		logAfter := gitLog(t, root)
 		assert.Equal(t, logBefore, logAfter)
+	})
+
+	t.Run("deleting client file also removes canonical copy", func(t *testing.T) {
+		root := t.TempDir()
+		s, err := store.New(t.Context(), root)
+		require.NoError(t, err)
+		require.NoError(t, s.Write(t.Context(), "clients/host-a", "global/CLAUDE.md", []byte("hello"), "host-a"))
+
+		err = s.Delete(t.Context(), "clients/host-a", "global/CLAUDE.md", "host-a")
+		require.NoError(t, err)
+
+		_, clientStatErr := os.Stat(filepath.Join(root, "clients", "host-a", "global", "CLAUDE.md"))
+		assert.True(t, os.IsNotExist(clientStatErr))
+		_, canonicalStatErr := os.Stat(filepath.Join(root, "canonical", "global", "CLAUDE.md"))
+		assert.True(t, os.IsNotExist(canonicalStatErr))
+		assert.Empty(t, gitStatusPorcelain(t, root))
+	})
+
+	t.Run("deleting client file when canonical copy already absent succeeds", func(t *testing.T) {
+		root := t.TempDir()
+		s, err := store.New(t.Context(), root)
+		require.NoError(t, err)
+		require.NoError(t, s.Write(t.Context(), "clients/host-a", "global/CLAUDE.md", []byte("hello"), "host-a"))
+		require.NoError(t, s.Delete(t.Context(), "canonical", "global/CLAUDE.md", "host-a"))
+
+		err = s.Delete(t.Context(), "clients/host-a", "global/CLAUDE.md", "host-a")
+		require.NoError(t, err)
+
+		_, clientStatErr := os.Stat(filepath.Join(root, "clients", "host-a", "global", "CLAUDE.md"))
+		assert.True(t, os.IsNotExist(clientStatErr))
+		assert.Empty(t, gitStatusPorcelain(t, root))
+	})
+
+	t.Run("deleting when client copy absent but canonical present removes canonical", func(t *testing.T) {
+		root := t.TempDir()
+		s, err := store.New(t.Context(), root)
+		require.NoError(t, err)
+		require.NoError(t, s.Write(t.Context(), "canonical", "global/CLAUDE.md", []byte("hello"), "host-a"))
+
+		err = s.Delete(t.Context(), "clients/host-a", "global/CLAUDE.md", "host-a")
+		require.NoError(t, err)
+
+		_, canonicalStatErr := os.Stat(filepath.Join(root, "canonical", "global", "CLAUDE.md"))
+		assert.True(t, os.IsNotExist(canonicalStatErr))
+		assert.Empty(t, gitStatusPorcelain(t, root))
 	})
 }
