@@ -26,6 +26,8 @@ Hub-and-spoke sync of Claude Code memory files (`~/.claude` content) across mach
 - **`internal/manifest`** — content-hash manifests + `manifest.Diff`, the 3-way diff engine both directions of sync rely on. Change kinds (`LocalOnlyChange`, `LocalDelete`, …) drive what each sync step does.
 - **`internal/syncer/slug.go` / `localpath.go`** — mapping between local `~/.claude` paths and namespaced sync paths (slug prefix per machine identifies per-project memory dirs).
 
+Sync whitelist (`internal/syncer/scan.go`): `CLAUDE.md` → `global/CLAUDE.md`, `rules/*.md` → `global/rules/`, `skills/` and `agents/` full trees → `global/skills/` / `global/agents/` (phase 2a), `projects/<slug>/memory/` → `projects/<canonical-key>/memory/`.
+
 ### Error handling (`internal/domain`)
 
 Ported pseudo-stack design; all new error paths must use it:

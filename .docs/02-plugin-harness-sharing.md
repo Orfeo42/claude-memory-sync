@@ -1,7 +1,33 @@
-# Phase 2 — plugin/harness sharing (future, context only)
+# Phase 2 — plugin/harness sharing
 
-Not planned yet. This doc exists so a future session can start Phase 2
-without re-deriving the following facts.
+## Status (2026-07-26)
+
+- **Phase 2a DONE**: `~/.claude/skills/` and `~/.claude/agents/` full
+  directory trees sync via the existing agent (`scanGlobalTree` in
+  `internal/syncer/scan.go`, namespaces `global/skills/` and
+  `global/agents/`). No server change was needed — the store is
+  namespace-generic.
+- **Plugin open question RESOLVED**: plugin install state under
+  `~/.claude/plugins/cache/` is just git clones keyed by commit sha
+  (`installed_plugins.json` records installPath + sha). Config-replay is
+  sufficient: replicating a plugin on a new machine = replaying the
+  `extraKnownMarketplaces` + `enabledPlugins` blocks of `settings.json`.
+  No plugin-local state to sync. Plugin config replay itself: still not
+  implemented, deferred.
+- **`~/.zshrc.d/` DEFERRED, direction chosen**: instead of syncing zsh
+  dotfiles as-is, convert helper-function families (forgejo, keycloak,
+  zendesk, db, openstack) into **skills with executable POSIX-sh
+  scripts** under `~/.claude/skills/<family>/bin/` — those sync for free
+  via phase 2a, are shell-agnostic, and Claude invokes one short command
+  instead of re-deriving raw API calls. zsh functions shrink to thin
+  wrappers (or PATH entries) over the same scripts. Secret lookup goes
+  through one shared helper script (secret-tool, env-var fallback).
+  Pure-interactive helpers (mkcd, extract, wol, history hooks) stay
+  zsh-only, out of scope. When/if raw zshrc.d sync is ever wanted:
+  whitelist `*.zsh`, exclude `*.bak` (4 junk .bak files present),
+  `git-hooks.zsh` currently empty.
+
+## Original survey notes (kept for context)
 
 ## Goal (as stated by user)
 

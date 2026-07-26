@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"claude-memory-sync/internal/manifest"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -16,10 +18,12 @@ func writeFile(t *testing.T, path, content string) {
 }
 
 func TestScanLocal(t *testing.T) {
-	t.Run("includes CLAUDE.md, rules, and mapped project memory files", func(t *testing.T) {
+	t.Run("includes CLAUDE.md, rules, skills, agents, and mapped project memory files", func(t *testing.T) {
 		claudeDir := t.TempDir()
 		writeFile(t, filepath.Join(claudeDir, "CLAUDE.md"), "global claude")
 		writeFile(t, filepath.Join(claudeDir, "rules", "go.md"), "go rules")
+		writeFile(t, filepath.Join(claudeDir, "skills", "pr-description", "SKILL.md"), "skill content")
+		writeFile(t, filepath.Join(claudeDir, "agents", "implementer.md"), "agent content")
 		writeFile(t, filepath.Join(claudeDir, "projects", "-home-orfeo42", "memory", "notes.md"), "home notes")
 		writeFile(t, filepath.Join(claudeDir, "projects", "-home-orfeo42-my-project", "memory", "sub", "a.md"), "project a notes")
 
@@ -34,11 +38,15 @@ func TestScanLocal(t *testing.T) {
 		assert.ElementsMatch(t, []string{
 			"global/CLAUDE.md",
 			"global/rules/go.md",
+			"global/skills/pr-description/SKILL.md",
+			"global/agents/implementer.md",
 			"projects/HOME/memory/notes.md",
 			"projects/HOME-my-project/memory/sub/a.md",
 		}, gotPaths)
 
 		assert.Equal(t, filepath.Join(claudeDir, "CLAUDE.md"), paths["global/CLAUDE.md"])
+		assert.Equal(t, filepath.Join(claudeDir, "skills", "pr-description", "SKILL.md"), paths["global/skills/pr-description/SKILL.md"])
+		assert.Equal(t, filepath.Join(claudeDir, "agents", "implementer.md"), paths["global/agents/implementer.md"])
 		assert.Equal(t, filepath.Join(claudeDir, "projects", "-home-orfeo42-my-project", "memory", "sub", "a.md"), paths["projects/HOME-my-project/memory/sub/a.md"])
 	})
 
@@ -98,5 +106,45 @@ func TestScanLocal(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, result)
 		assert.Empty(t, paths)
+	})
+}
+
+func TestScanGlobalTree(t *testing.T) {
+	t.Run("scans nested files under dir with correct namespace path and hash", func(t *testing.T) {
+		claudeDir := t.TempDir()
+		skillPath := filepath.Join(claudeDir, "skills", "pr-description", "SKILL.md")
+		writeFile(t, skillPath, "skill content")
+
+		result, paths, err := scanGlobalTree(claudeDir, "skills", "global/skills/")
+		require.NoError(t, err)
+
+		wantSum, err := manifest.HashFile(skillPath)
+		require.NoError(t, err)
+
+		require.Len(t, result, 1)
+		assert.Equal(t, "global/skills/pr-description/SKILL.md", result[0].Path)
+		assert.Equal(t, wantSum, result[0].SHA256)
+		assert.Equal(t, skillPath, paths["global/skills/pr-description/SKILL.md"])
+	})
+
+	t.Run("returns nil for missing dir", func(t *testing.T) {
+		claudeDir := t.TempDir()
+
+		result, paths, err := scanGlobalTree(claudeDir, "skills", "global/skills/")
+		require.NoError(t, err)
+		assert.Nil(t, result)
+		assert.Nil(t, paths)
+	})
+
+	t.Run("skips symlinked dir", func(t *testing.T) {
+		claudeDir := t.TempDir()
+		realDir := t.TempDir()
+		writeFile(t, filepath.Join(realDir, "SKILL.md"), "skill content")
+		require.NoError(t, os.Symlink(realDir, filepath.Join(claudeDir, "skills")))
+
+		result, paths, err := scanGlobalTree(claudeDir, "skills", "global/skills/")
+		require.NoError(t, err)
+		assert.Nil(t, result)
+		assert.Nil(t, paths)
 	})
 }
