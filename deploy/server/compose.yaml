@@ -1,9 +1,6 @@
 services:
   memory-server:
     image: ghcr.io/orfeo42/claude-memory-sync-server:latest
-    build:
-      context: ../..
-      dockerfile: build/server.Dockerfile
     volumes:
       - memory-data:/data
     environment:
@@ -18,7 +15,7 @@ services:
       - backup
     volumes:
       - memory-data:/data
-      - ${MEMORY_BACKUP_SSH_KEY:?}:/root/.ssh/id_ed25519:ro
+      - ${MEMORY_BACKUP_SSH_KEY:-/dev/null}:/root/.ssh/id_ed25519:ro
     entrypoint: ["git", "-C", "/data", "push", "origin", "storage"]
 
 volumes:
