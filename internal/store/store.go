@@ -203,15 +203,23 @@ func (s *gitStore) Write(ctx context.Context, namespace, path string, content []
 	if err != nil {
 		return err
 	}
-
-	if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
-		return fmt.Errorf("create parent dir: %w", err)
-	}
-	if err := os.WriteFile(target, content, 0o600); err != nil {
-		return fmt.Errorf("write file: %w", err)
+	if err := writeFile(target, content); err != nil {
+		return err
 	}
 
-	if err := s.commit(ctx, relPath, clientID, namespace, path); err != nil {
+	relPaths := []string{relPath}
+	mirrorTarget, mirrorRel, err := s.mirrorPaths(namespace, path)
+	if err != nil {
+		return err
+	}
+	if mirrorTarget != "" {
+		if err := writeFile(mirrorTarget, content); err != nil {
+			return err
+		}
+		relPaths = append(relPaths, mirrorRel)
+	}
+
+	if err := s.commit(ctx, clientID, namespace, path, relPaths...); err != nil {
 		return err
 	}
 
@@ -230,23 +238,20 @@ func (s *gitStore) Delete(ctx context.Context, namespace, path string, clientID 
 		return err
 	}
 
-	if _, err := os.Stat(target); os.IsNotExist(err) {
+	mirrorTarget, mirrorRel, err := s.mirrorPaths(namespace, path)
+	if err != nil {
+		return err
+	}
+
+	if !fileExists(target) && (mirrorTarget == "" || !fileExists(mirrorTarget)) {
 		return nil
 	}
 
-	if err := runGit(ctx, s.root, "rm", "-f", "--", relPath); err != nil {
-		return fmt.Errorf("git rm: %w", err)
+	if err := s.gitRemove(ctx, relPath, mirrorRel); err != nil {
+		return err
 	}
-
-	hasChanges, err := gitHasStagedChanges(ctx, s.root)
-	if err != nil {
-		return fmt.Errorf("check staged changes: %w", err)
-	}
-	if hasChanges {
-		msg := fmt.Sprintf("sync: %s %s/%s", clientID, namespace, path)
-		if err := runGit(ctx, s.root, "commit", "-m", msg); err != nil {
-			return fmt.Errorf("git commit: %w", err)
-		}
+	if err := s.commitIfStaged(ctx, clientID, namespace, path); err != nil {
+		return err
 	}
 
 	slog.InfoContext(
@@ -258,11 +263,52 @@ func (s *gitStore) Delete(ctx context.Context, namespace, path string, clientID 
 	return nil
 }
 
-func (s *gitStore) commit(ctx context.Context, relPath, clientID, namespace, path string) error {
-	if err := runGit(ctx, s.root, "add", "--", relPath); err != nil {
+func (s *gitStore) mirrorPaths(namespace, path string) (string, string, error) {
+	if !strings.HasPrefix(namespace, clientsDir+"/") {
+		return "", "", nil
+	}
+	return s.resolve(canonicalDir, path)
+}
+
+func writeFile(target string, content []byte) error {
+	if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
+		return fmt.Errorf("create parent dir: %w", err)
+	}
+	if err := os.WriteFile(target, content, 0o600); err != nil {
+		return fmt.Errorf("write file: %w", err)
+	}
+	return nil
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func (s *gitStore) gitRemove(ctx context.Context, relPath, mirrorRel string) error {
+	args := []string{"rm", "-f"}
+	if mirrorRel != "" {
+		args = append(args, "--ignore-unmatch")
+	}
+	args = append(args, "--", relPath)
+	if mirrorRel != "" {
+		args = append(args, mirrorRel)
+	}
+	if err := runGit(ctx, s.root, args...); err != nil {
+		return fmt.Errorf("git rm: %w", err)
+	}
+	return nil
+}
+
+func (s *gitStore) commit(ctx context.Context, clientID, namespace, path string, relPaths ...string) error {
+	args := append([]string{"add", "--"}, relPaths...)
+	if err := runGit(ctx, s.root, args...); err != nil {
 		return fmt.Errorf("git add: %w", err)
 	}
+	return s.commitIfStaged(ctx, clientID, namespace, path)
+}
 
+func (s *gitStore) commitIfStaged(ctx context.Context, clientID, namespace, path string) error {
 	hasChanges, err := gitHasStagedChanges(ctx, s.root)
 	if err != nil {
 		return fmt.Errorf("check staged changes: %w", err)

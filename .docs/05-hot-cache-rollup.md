@@ -1,7 +1,34 @@
-# Phase 5 — daily synthesis, hot cache, knowledge UI (future, context only)
+# Phase 5 — daily synthesis, hot cache, knowledge UI
 
-Not planned yet. This doc exists so a future session can start Phase 5
-without re-deriving the following facts.
+## Status (2026-07-26)
+
+**Daily synthesis IMPLEMENTED** as the `memory-synthesizer` microservice
+(user decision: separate compose service on the Pi, not a host timer):
+
+- `build/synthesizer.Dockerfile` (node:22-bookworm-slim + git + jq +
+  Claude Code CLI, non-root uid 1000) + `build/synthesizer/run.sh`
+  (loop, `SYNTH_INTERVAL` default 24h) + `synth.sh` (one pass).
+- Auth: `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` —
+  subscription-billed, 1-year validity, NO API credits. `run.sh`
+  refuses to start if `ANTHROPIC_API_KEY` is set (would silently take
+  precedence and bill API credits).
+- Pass: for each `canonical/projects/*/memory/` with ≥2 entries, one
+  `claude -p` call (model `SYNTH_MODEL`, default sonnet) with the
+  ===FILE===/===DELETE===/NOTHING output contract; filename validation,
+  secret-scrub reject gate, MEMORY.md mechanically rebuilt, one git
+  commit per project (`synthesize: <key>`), commit retried 3x against
+  server lock contention. Post-hoc audit model: every change is a
+  revertable commit.
+- Runs directly on the shared `memory-data` volume — no new server API.
+  Single writer co-located with storage resolves the which-machine race
+  question below.
+- Verified: stub end-to-end + one real-LLM pass (merged two duplicate
+  feedback entries correctly, left unrelated entry alone).
+
+Still open from this doc: hot-cache tier (`HOT.md`) and Obsidian UI —
+not built; measure MEMORY.md sizes before deciding the cache tier.
+
+## Original context
 
 ## Origin
 
