@@ -76,6 +76,24 @@ func TestDiff(t *testing.T) {
 		assert.Equal(t, manifest.BothChanged, got["a.md"])
 	})
 
+	t.Run("unchanged when local and remote both changed to identical content", func(t *testing.T) {
+		local := manifest.Manifest{entry("a.md", "h2")}
+		base := manifest.Manifest{entry("a.md", "h1")}
+		remote := manifest.Manifest{entry("a.md", "h2")}
+
+		got := manifest.Diff(local, base, remote)
+		assert.Equal(t, manifest.Unchanged, got["a.md"])
+	})
+
+	t.Run("unchanged when local and remote both added identical file absent from base", func(t *testing.T) {
+		local := manifest.Manifest{entry("a.md", "h2")}
+		base := manifest.Manifest{}
+		remote := manifest.Manifest{entry("a.md", "h2")}
+
+		got := manifest.Diff(local, base, remote)
+		assert.Equal(t, manifest.Unchanged, got["a.md"])
+	})
+
 	t.Run("path absent everywhere but base produces no residual classification issue", func(t *testing.T) {
 		local := manifest.Manifest{entry("a.md", "h1"), entry("b.md", "hb")}
 		base := manifest.Manifest{entry("a.md", "h1")}

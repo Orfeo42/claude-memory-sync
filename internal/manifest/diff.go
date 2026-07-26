@@ -33,6 +33,11 @@ func Diff(local, base, remote Manifest) map[string]ChangeType {
 		baseEntry, inBase := baseMap[path]
 		remoteEntry, inRemote := remoteMap[path]
 
+		if inLocal && inRemote && localEntry.SHA256 == remoteEntry.SHA256 {
+			result[path] = Unchanged
+			continue
+		}
+
 		localChanged := changed(inLocal, inBase, localEntry.SHA256, baseEntry.SHA256)
 		remoteChanged := changed(inRemote, inBase, remoteEntry.SHA256, baseEntry.SHA256)
 
