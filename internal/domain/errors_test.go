@@ -16,13 +16,13 @@ import (
 
 func TestError(t *testing.T) {
 	t.Run("returns nil on nil input", func(t *testing.T) {
-		assert.NoError(t, domain.Error(nil, "some message"))
+		require.NoError(t, domain.Error(nil, "some message"))
 	})
 
 	t.Run("preserves identity via errors.Is", func(t *testing.T) {
 		wrapped := domain.Error(domain.ErrNotFound, "record lookup failed")
 
-		assert.ErrorIs(t, wrapped, domain.ErrNotFound)
+		require.ErrorIs(t, wrapped, domain.ErrNotFound)
 	})
 
 	t.Run("origin attr contains the test file name", func(t *testing.T) {
@@ -42,13 +42,13 @@ func TestError(t *testing.T) {
 
 func TestWrapError(t *testing.T) {
 	t.Run("returns nil on nil input", func(t *testing.T) {
-		assert.NoError(t, domain.WrapError(nil))
+		require.NoError(t, domain.WrapError(nil))
 	})
 
 	t.Run("preserves identity via errors.Is", func(t *testing.T) {
 		wrapped := domain.WrapError(domain.ErrUpstream, slog.String("api", "billing"))
 
-		assert.ErrorIs(t, wrapped, domain.ErrUpstream)
+		require.ErrorIs(t, wrapped, domain.ErrUpstream)
 	})
 
 	t.Run("origin attr contains the test file name", func(t *testing.T) {
@@ -73,8 +73,10 @@ func findOriginAttr(t *testing.T, attrs []slog.Attr) []string {
 		if a.Key != "origin" {
 			continue
 		}
-		origins := make([]string, 0)
-		origins = append(origins, a.Value.Any().([]string)...)
+		origins, ok := a.Value.Any().([]string)
+		if !ok {
+			t.Fatal("origin attr value is not a []string")
+		}
 		return origins
 	}
 	t.Fatal("no origin attr found")
