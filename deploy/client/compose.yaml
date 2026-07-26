@@ -1,6 +1,7 @@
 services:
   memory-agent:
     image: ghcr.io/orfeo42/claude-memory-sync-agent:latest
+    pull_policy: "always"
     volumes:
       - ${CLAUDE_DIR:-~/.claude}:/claude
       - agent-state:/state

@@ -1,6 +1,7 @@
 services:
   memory-server:
     image: ghcr.io/orfeo42/claude-memory-sync-server:latest
+    pull_policy: "always"
     volumes:
       - memory-data:/data
     environment:
