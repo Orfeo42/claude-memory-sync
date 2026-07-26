@@ -20,11 +20,12 @@ Multi-step effort, not a one-shot build. Status per phase below.
 | ----- | ---------------------------------------------------------------------------------- | ----------------------------------------- |
 | 0     | [.docs/00-repo-and-scaffold.md](.docs/00-repo-and-scaffold.md)                     | Done (2026-07-19)                         |
 | 1     | [.docs/01-hub-sync.md](.docs/01-hub-sync.md)                                       | Implemented + e2e green — rollout pending |
-| 2     | [.docs/02-plugin-harness-sharing.md](.docs/02-plugin-harness-sharing.md)           | Future — context captured, not planned    |
-| 3     | [.docs/03-condense-dedup.md](.docs/03-condense-dedup.md)                           | Future — context captured, not planned    |
+| 2     | [.docs/02-plugin-harness-sharing.md](.docs/02-plugin-harness-sharing.md)           | 2a done (skills/agents sync); rest future |
+| 3     | [.docs/03-condense-dedup.md](.docs/03-condense-dedup.md)                           | Layer A done (canonical dual-write)       |
 | 4     | [.docs/04-usage-mining-rules.md](.docs/04-usage-mining-rules.md)                   | Future — context captured, not planned    |
-| 5     | [.docs/05-hot-cache-rollup.md](.docs/05-hot-cache-rollup.md)                       | Future — context captured, not planned    |
-| 6     | [.docs/06-transcript-knowledge-mining.md](.docs/06-transcript-knowledge-mining.md) | Future — context captured, not planned    |
+| 5     | [.docs/05-hot-cache-rollup.md](.docs/05-hot-cache-rollup.md)                       | Synthesizer done; hot cache + UI future   |
+| 6     | [.docs/06-transcript-knowledge-mining.md](.docs/06-transcript-knowledge-mining.md) | memory-mine skill done; backfill pending  |
+| 7     | [.docs/07-backup-remote.md](.docs/07-backup-remote.md)                             | Future — context captured, not planned    |
 
 ## Ground rules (apply to every phase)
 
