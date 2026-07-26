@@ -125,7 +125,12 @@ process_project() {
 
   while IFS= read -r name; do
     [ -z "$name" ] && continue
-    if [ "$name" = "MEMORY.md" ]; then
+    normalized=$(printf '%s' "$name" | tr '_[:upper:]' '-[:lower:]')
+    if [ "$normalized" != "$name" ] && [ -f "$ops_dir/$name" ]; then
+      mv -- "$ops_dir/$name" "$ops_dir/$normalized"
+    fi
+    name=$normalized
+    if [ "$name" = "memory.md" ]; then
       echo "synth.sh: rejecting FILE op targeting MEMORY.md for project $project_key" >&2
       continue
     fi
@@ -142,7 +147,8 @@ process_project() {
 
   while IFS= read -r name; do
     [ -z "$name" ] && continue
-    if [ "$name" = "MEMORY.md" ]; then
+    name=$(printf '%s' "$name" | tr '_[:upper:]' '-[:lower:]')
+    if [ "$name" = "memory.md" ]; then
       echo "synth.sh: rejecting DELETE op targeting MEMORY.md for project $project_key" >&2
       continue
     fi
