@@ -1,19 +1,23 @@
 # Phase 3 — condense/dedup
 
-## Status (2026-07-26)
+## Status (2026-08-01)
 
-- **Layer A (structural merge) DONE**: `canonical/` is populated by
-  **server-side dual-write** — every `Write`/`Delete` on a
-  `clients/<id>` namespace mirrors the same path under `canonical/` in
-  the same git commit (`internal/store/store.go`, `mirrorPaths`).
-  Last-writer-wins per file; the agent's existing `BothChanged` guard
-  ("local wins, skipping canonical update") covers genuine concurrent
-  conflicts. `manifest.Diff` classifies local/remote entries with equal
-  SHA256 as `Unchanged` so a machine's own mirrored write doesn't echo
-  back as a conflict. Cross-machine sync is live from this point.
-- **Layer B (semantic condense/dedup, LLM)** — still future; runs under
-  phase 5's daily job per the post-hoc audit model. The rest of this
-  doc concerns Layer B.
+- **Layer A (structural merge) — reimplemented as the async intake
+  pass** (see [docs/08](08-git-native-sync.md)). The original dual-write
+  mirror (`internal/store` `mirrorPaths`, every client write echoed into
+  `canonical/` in the same commit) shipped 2026-07-26 and is now
+  removed: `canonical` is written only by `build/synthesizer/intake.sh`,
+  which reads new commits in each client bare repo (marker ref
+  `refs/intake/last-processed`), merges config trees mechanically
+  (last-writer-wins by commit timestamp) and passes changed
+  `projects/*/memory/` entries through an LLM novelty judgment before
+  they enter the knowledge base. The agent's `BothChanged` guard
+  ("local wins, skipping canonical update") still covers concurrent
+  conflicts on down-sync.
+- **Layer B (semantic condense/dedup, LLM)** — implemented as the daily
+  synthesizer pass (`synth.sh`, docs/05); intake (novelty at ingress)
+  and condense (dedup of the standing corpus) are now siblings sharing
+  guardrail helpers (`lib.sh`).
 
 ## Goal (as stated by user)
 

@@ -72,8 +72,7 @@ func main() {
 
 	cfg := loadConfig()
 
-	client := syncer.NewHTTPClient(cfg.ServerURL, cfg.Token, cfg.ClientID)
-	agent := syncer.New(cfg, client)
+	agent := syncer.New(cfg)
 
 	slog.Info("starting memory-agent",
 		slog.String("server_url", cfg.ServerURL),

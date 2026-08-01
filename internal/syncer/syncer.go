@@ -7,37 +7,33 @@ import (
 	"os"
 	"path/filepath"
 
+	"claude-memory-sync/internal/domain"
 	"claude-memory-sync/internal/manifest"
 )
 
 type Agent struct {
-	cfg    Config
-	client HTTPClient
+	cfg Config
 }
 
-func New(cfg Config, client HTTPClient) *Agent {
-	return &Agent{cfg: cfg, client: client}
+func New(cfg Config) *Agent {
+	return &Agent{cfg: cfg}
 }
 
 func (a *Agent) RunCycle(ctx context.Context) error {
 	local, localPaths, err := scanLocal(a.cfg.ClaudeDir, a.cfg.SlugPrefix)
 	if err != nil {
-		return fmt.Errorf("scan local: %w", err)
+		return domain.Error(err, "scan local")
 	}
 
 	if err := a.upSync(ctx, local, localPaths); err != nil {
-		return fmt.Errorf("up-sync: %w", err)
+		return domain.Error(err, "up-sync")
 	}
 
 	if err := a.downSync(ctx, local); err != nil {
-		return fmt.Errorf("down-sync: %w", err)
+		return domain.Error(err, "down-sync")
 	}
 
 	return nil
-}
-
-func (a *Agent) clientBasePath() string {
-	return filepath.Join(a.cfg.StateDir, clientBaseFile)
 }
 
 func (a *Agent) canonicalBasePath() string {
@@ -45,64 +41,53 @@ func (a *Agent) canonicalBasePath() string {
 }
 
 func (a *Agent) upSync(ctx context.Context, local manifest.Manifest, localPaths map[string]string) error {
-	base, err := loadManifest(a.clientBasePath())
-	if err != nil {
+	if err := ensureStagingRepo(ctx, a.cfg); err != nil {
 		return err
 	}
-
-	diff := manifest.Diff(local, base, base)
-	for path, change := range diff {
-		switch change {
-		case manifest.LocalOnlyChange:
-			content, readErr := os.ReadFile(localPaths[path])
-			if readErr != nil {
-				return fmt.Errorf("read local file %s: %w", path, readErr)
-			}
-			if putErr := a.client.PutClientFile(ctx, path, content); putErr != nil {
-				return fmt.Errorf("put client file %s: %w", path, putErr)
-			}
-			slog.InfoContext(ctx, "up-synced changed file", slog.String("path", path))
-		case manifest.LocalDelete:
-			if delErr := a.client.DeleteClientFile(ctx, path); delErr != nil {
-				return fmt.Errorf("delete client file %s: %w", path, delErr)
-			}
-			slog.InfoContext(ctx, "up-synced deleted file", slog.String("path", path))
-		default:
-		}
+	if err := syncWorktree(stagingDir(a.cfg), local, localPaths); err != nil {
+		return err
 	}
-
-	return saveManifest(a.clientBasePath(), local)
+	return commitAndPush(ctx, stagingDir(a.cfg))
 }
 
 func (a *Agent) downSync(ctx context.Context, local manifest.Manifest) error {
-	canonicalCurrent, err := a.client.CanonicalTree(ctx)
-	if err != nil {
-		return fmt.Errorf("get canonical tree: %w", err)
+	if err := ensureCanonicalMirror(ctx, a.cfg); err != nil {
+		return err
 	}
-
-	canonicalBase, err := loadManifest(a.canonicalBasePath())
+	canonicalCurrent, err := canonicalManifest(a.cfg)
 	if err != nil {
 		return err
+	}
+	canonicalBase, err := loadManifest(a.canonicalBasePath())
+	if err != nil {
+		return domain.Error(err, "load canonical base")
 	}
 
 	diff := manifest.Diff(local, canonicalBase, canonicalCurrent)
 	for path, change := range diff {
-		switch change {
-		case manifest.RemoteOnlyChange:
-			if applyErr := a.applyRemoteFile(ctx, path); applyErr != nil {
-				return applyErr
-			}
-		case manifest.RemoteDelete:
-			if delErr := a.applyRemoteDelete(path); delErr != nil {
-				return delErr
-			}
-		case manifest.BothChanged:
-			slog.WarnContext(ctx, "local wins, skipping canonical update", slog.String("path", path))
-		default:
+		if err := a.applyCanonicalChange(ctx, path, change); err != nil {
+			return err
 		}
 	}
 
-	return saveManifest(a.canonicalBasePath(), canonicalCurrent)
+	if err := saveManifest(a.canonicalBasePath(), canonicalCurrent); err != nil {
+		return domain.Error(err, "save canonical base")
+	}
+	return nil
+}
+
+func (a *Agent) applyCanonicalChange(ctx context.Context, path string, change manifest.ChangeType) error {
+	switch change {
+	case manifest.RemoteOnlyChange:
+		return a.applyRemoteFile(ctx, path)
+	case manifest.RemoteDelete:
+		return a.applyRemoteDelete(path)
+	case manifest.BothChanged:
+		slog.WarnContext(ctx, "local wins, skipping canonical update", slog.String("path", path))
+		return nil
+	default:
+		return nil
+	}
 }
 
 func (a *Agent) applyRemoteFile(ctx context.Context, path string) error {
@@ -115,19 +100,39 @@ func (a *Agent) applyRemoteFile(ctx context.Context, path string) error {
 		return nil
 	}
 
-	content, err := a.client.GetCanonicalFile(ctx, path)
+	content, err := os.ReadFile(filepath.Join(mirrorDir(a.cfg), filepath.FromSlash(path)))
 	if err != nil {
-		return fmt.Errorf("get canonical file %s: %w", path, err)
+		return domain.Error(err, "read canonical mirror file", slog.String("path", path))
 	}
 
-	if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
-		return fmt.Errorf("create parent dir for %s: %w", target, err)
-	}
-	if err := os.WriteFile(target, content, 0o600); err != nil {
-		return fmt.Errorf("write local file %s: %w", target, err)
+	if err := writeUnderClaudeDir(a.cfg.ClaudeDir, target, content); err != nil {
+		return err
 	}
 
 	slog.InfoContext(ctx, "down-synced changed file", slog.String("path", path))
+	return nil
+}
+
+func writeUnderClaudeDir(claudeDir, target string, content []byte) error {
+	rel, err := filepath.Rel(claudeDir, target)
+	if err != nil {
+		return domain.Error(err, "compute relative claude dir path", slog.String("path", target))
+	}
+
+	root, err := os.OpenRoot(claudeDir)
+	if err != nil {
+		return domain.Error(err, "open claude dir root", slog.String("path", claudeDir))
+	}
+	defer root.Close()
+
+	if parent := filepath.Dir(rel); parent != "." {
+		if err := root.MkdirAll(parent, 0o750); err != nil {
+			return domain.Error(err, "create parent dir", slog.String("path", parent))
+		}
+	}
+	if err := root.WriteFile(rel, content, 0o600); err != nil {
+		return domain.Error(err, "write local file", slog.String("path", rel))
+	}
 	return nil
 }
 

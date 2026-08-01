@@ -3,36 +3,9 @@ data_dir="${SYNTH_DATA_DIR:-/data}"
 claude_bin="${SYNTH_CLAUDE_BIN:-claude}"
 model="${SYNTH_MODEL:-sonnet}"
 
-if [ ! -d "$data_dir/.git" ]; then
-  echo "synth.sh: $data_dir is not a git repository (missing .git)" >&2
-  exit 1
-fi
+. "$(dirname "$0")/lib.sh"
 
-git config --global --add safe.directory "$data_dir"
-git config --global user.name memory-synthesizer
-git config --global user.email memory-synthesizer@local
-
-secret_pattern='(api[_-]?key|secret|password|token)[[:space:]]*[:=][[:space:]]*[^[:space:]]{8,}|ghp_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----'
-
-extract_frontmatter_field() {
-  awk -v field="$1" '
-    NR==1 && $0=="---" { infm=1; next }
-    infm && $0=="---" { exit }
-    infm && index($0, field ":")==1 {
-      print substr($0, length(field)+3)
-      exit
-    }
-  ' "$2"
-}
-
-strip_quotes() {
-  value="$1"
-  case "$value" in
-    \"*\") value=${value#\"}; value=${value%\"} ;;
-    \'*\') value=${value#\'}; value=${value%\'} ;;
-  esac
-  printf '%s' "$value"
-}
+ensure_canonical_work
 
 process_project() {
   memory_dir="$1"
@@ -89,34 +62,7 @@ process_project() {
   ops_dir="$scratch_dir/ops"
   files_list="$scratch_dir/files.list"
   deletes_list="$scratch_dir/deletes.list"
-  mkdir -p "$ops_dir"
-  : > "$files_list"
-  : > "$deletes_list"
-
-  awk -v opsdir="$ops_dir" -v fileslist="$files_list" -v deleteslist="$deletes_list" '
-    BEGIN { mode = "" }
-    index($0, "===FILE: ")==1 && $0 ~ /===$/ {
-      name = substr($0, 10)
-      name = substr(name, 1, length(name) - 3)
-      outfile = opsdir "/" name
-      print name >> fileslist
-      close(fileslist)
-      mode = "file"
-      next
-    }
-    $0 == "===END===" {
-      mode = ""
-      next
-    }
-    index($0, "===DELETE: ")==1 && $0 ~ /===$/ {
-      name = substr($0, 12)
-      name = substr(name, 1, length(name) - 3)
-      print name >> deleteslist
-      close(deleteslist)
-      next
-    }
-    mode == "file" { print $0 >> outfile; next }
-  ' "$out_file"
+  parse_llm_ops "$out_file" "$ops_dir" "$files_list" "$deletes_list"
 
   accepted_files="$scratch_dir/accepted_files.list"
   accepted_deletes="$scratch_dir/accepted_deletes.list"
@@ -125,42 +71,26 @@ process_project() {
 
   while IFS= read -r name; do
     [ -z "$name" ] && continue
-    normalized=$(printf '%s' "$name" | tr '_[:upper:]' '-[:lower:]')
-    if [ "$normalized" != "$name" ] && [ -f "$ops_dir/$name" ]; then
-      mv -- "$ops_dir/$name" "$ops_dir/$normalized"
-    fi
-    name=$normalized
-    if [ "$name" = "memory.md" ]; then
-      echo "synth.sh: rejecting FILE op targeting MEMORY.md for project $project_key" >&2
+    if ! validated=$(validate_op_filename "$name" "synth.sh: project $project_key" "$ops_dir"); then
       continue
     fi
-    if ! printf '%s\n' "$name" | grep -Eq '^[a-z0-9]+(-[a-z0-9]+)*\.md$'; then
-      echo "synth.sh: rejecting FILE op with invalid filename '$name' for project $project_key" >&2
+    if scan_op_secrets "$ops_dir/$validated"; then
+      echo "synth.sh: rejecting FILE op for '$validated' in project $project_key: possible secret detected" >&2
       continue
     fi
-    if grep -Eqi "$secret_pattern" "$ops_dir/$name"; then
-      echo "synth.sh: rejecting FILE op for '$name' in project $project_key: possible secret detected" >&2
-      continue
-    fi
-    echo "$name" >> "$accepted_files"
+    echo "$validated" >> "$accepted_files"
   done < "$files_list"
 
   while IFS= read -r name; do
     [ -z "$name" ] && continue
-    name=$(printf '%s' "$name" | tr '_[:upper:]' '-[:lower:]')
-    if [ "$name" = "memory.md" ]; then
-      echo "synth.sh: rejecting DELETE op targeting MEMORY.md for project $project_key" >&2
+    if ! validated=$(validate_op_filename "$name" "synth.sh: project $project_key"); then
       continue
     fi
-    if ! printf '%s\n' "$name" | grep -Eq '^[a-z0-9]+(-[a-z0-9]+)*\.md$'; then
-      echo "synth.sh: rejecting DELETE op with invalid filename '$name' for project $project_key" >&2
+    if [ ! -f "$memory_dir/$validated" ]; then
+      echo "synth.sh: rejecting DELETE op for '$validated' in project $project_key: target does not exist" >&2
       continue
     fi
-    if [ ! -f "$memory_dir/$name" ]; then
-      echo "synth.sh: rejecting DELETE op for '$name' in project $project_key: target does not exist" >&2
-      continue
-    fi
-    echo "$name" >> "$accepted_deletes"
+    echo "$validated" >> "$accepted_deletes"
   done < "$deletes_list"
 
   accepted_files_count=$(wc -l < "$accepted_files" | tr -d ' ')
@@ -183,41 +113,9 @@ process_project() {
     rm -f "$memory_dir/$name"
   done < "$accepted_deletes"
 
-  header_file="$scratch_dir/header.txt"
-  if [ -f "$memory_index" ]; then
-    awk '/^- \[/{exit} {print}' "$memory_index" > "$header_file"
-  else
-    printf '# Memory index\n\n' > "$header_file"
-  fi
+  rebuild_memory_index "$memory_dir"
 
-  new_index="$scratch_dir/MEMORY.md.new"
-  cp "$header_file" "$new_index"
-
-  for entry in "$memory_dir"/*.md; do
-    [ -f "$entry" ] || continue
-    entry_name=$(basename "$entry")
-    [ "$entry_name" = "MEMORY.md" ] && continue
-    fm_name=$(extract_frontmatter_field name "$entry")
-    fm_description=$(extract_frontmatter_field description "$entry")
-    fm_description=$(strip_quotes "$fm_description")
-    printf -- '- [%s](%s) — %s\n' "$fm_name" "$entry_name" "$fm_description" >> "$new_index"
-  done
-
-  mv "$new_index" "$memory_index"
-
-  attempt=1
-  committed=0
-  while [ "$attempt" -le 3 ]; do
-    git -C "$data_dir" add -A -- "$memory_dir"
-    if git -C "$data_dir" commit -m "synthesize: $project_key" -- "$memory_dir" >/dev/null 2>&1; then
-      committed=1
-      break
-    fi
-    attempt=$((attempt + 1))
-    sleep 2
-  done
-
-  if [ "$committed" -eq 1 ]; then
+  if with_canonical_lock commit_with_retry "$work_dir" "synthesize: $project_key" "$memory_dir"; then
     changed=1
   else
     echo "synth.sh: failed to commit changes for project $project_key after 3 attempts, changes left staged" >&2
@@ -230,7 +128,7 @@ process_project() {
 
 projects_changed=0
 
-for memory_dir in "$data_dir"/canonical/projects/*/memory; do
+for memory_dir in "$work_dir"/projects/*/memory; do
   [ -d "$memory_dir" ] || continue
   project_key=$(basename "$(dirname "$memory_dir")")
   process_project "$memory_dir" "$project_key"
@@ -238,5 +136,9 @@ for memory_dir in "$data_dir"/canonical/projects/*/memory; do
     projects_changed=$((projects_changed + 1))
   fi
 done
+
+if [ "$projects_changed" -gt 0 ]; then
+  with_canonical_lock git -C "$work_dir" push origin main
+fi
 
 printf 'synthesis pass done, projects_changed=%s\n' "$projects_changed"

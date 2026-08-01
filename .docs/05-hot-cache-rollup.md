@@ -25,8 +25,20 @@
 - Verified: stub end-to-end + one real-LLM pass (merged two duplicate
   feedback entries correctly, left unrelated entry alone).
 
+**Update 2026-08-01 (git-native v2, docs/08):** the synthesizer image
+now hosts a second loop, the **intake pass** (`intake.sh` /
+`intake-run.sh`, own compose service `memory-intake`, `INTAKE_INTERVAL`
+default 45m) — novelty judgment at ingress, replacing the removed
+dual-write mirror. `synth.sh` (daily condense) and `intake.sh` share
+guardrail helpers in `lib.sh` and serialize canonical writes via
+`flock` on `/data/state/canonical.lock`; both operate on the
+`/data/work/canonical` clone and push to `/data/repos/canonical.git`.
+
 Still open from this doc: hot-cache tier (`HOT.md`) and Obsidian UI —
-not built; measure MEMORY.md sizes before deciding the cache tier.
+not built. MEMORY.md sizes measured post-backfill (2026-08-01):
+billing-backend ~33 KB / 148 entries, claude-memory-sync ~22 KB,
+orchestration-backend ~18 KB — large enough that the hot-cache tier is
+worth building after v2 stabilizes.
 
 ## Original context
 
