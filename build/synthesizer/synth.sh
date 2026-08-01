@@ -5,6 +5,8 @@ model="${SYNTH_MODEL:-sonnet}"
 
 . "$(dirname "$0")/lib.sh"
 
+echo "synthesis pass started"
+
 ensure_canonical_work
 
 process_project() {
