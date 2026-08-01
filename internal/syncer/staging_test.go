@@ -108,4 +108,24 @@ func TestCommitAndPush(t *testing.T) {
 		assert.Equal(t, 1, bareCommitCount(t, clientDir))
 		assert.Contains(t, bareLsTree(t, clientDir), "CLAUDE.md")
 	})
+
+	t.Run("retries a previously rejected push when nothing new is staged", func(t *testing.T) {
+		cfg, base := newTestConfig(t, "host-c", "-home-orfeo42")
+		require.NoError(t, ensureStagingRepo(context.Background(), cfg))
+
+		clientDir := clientBareDir(base, "host-c")
+		hookPath := filepath.Join(clientDir, "hooks", "pre-receive")
+		require.NoError(t, os.WriteFile(hookPath, []byte("#!/bin/sh\nexit 1\n"), 0o755))
+
+		dir := stagingDir(cfg)
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("hello"), 0o644))
+		require.Error(t, commitAndPush(context.Background(), dir))
+		assert.Empty(t, runGit(t, "", "--git-dir", clientDir, "rev-list", "--all"))
+
+		require.NoError(t, os.Remove(hookPath))
+
+		require.NoError(t, commitAndPush(context.Background(), dir))
+		assert.Equal(t, 1, bareCommitCount(t, clientDir))
+		assert.Contains(t, bareLsTree(t, clientDir), "CLAUDE.md")
+	})
 }
