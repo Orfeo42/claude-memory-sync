@@ -115,6 +115,10 @@ rebuild_memory_index() {
 }
 
 ensure_canonical_work() {
+  with_canonical_lock ensure_canonical_work_locked
+}
+
+ensure_canonical_work_locked() {
   mkdir -p "$repos_dir/clients" "$data_dir/state"
 
   if [ ! -d "$repos_dir/canonical.git" ]; then
