@@ -157,6 +157,7 @@ func commitAndPush(ctx context.Context, dir string) error {
 		return domain.Error(err, "push staging changes", slog.String("path", dir))
 	}
 
+	slog.InfoContext(ctx, "pushed staging changes", slog.Int("changed_paths", changed))
 	return nil
 }
 
