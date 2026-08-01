@@ -141,7 +141,7 @@ func commitAndPush(ctx context.Context, dir string) error {
 		return domain.Error(err, "check staged changes", slog.String("path", dir))
 	}
 	if !hasStaged {
-		return nil
+		return pushIfAhead(ctx, dir)
 	}
 
 	out, err := gitutil.RunOutput(ctx, dir, "diff", "--cached", "--name-only")
@@ -158,6 +158,32 @@ func commitAndPush(ctx context.Context, dir string) error {
 	}
 
 	return nil
+}
+
+func pushIfAhead(ctx context.Context, dir string) error {
+	if !refExists(ctx, dir, "main") {
+		return nil
+	}
+	if refExists(ctx, dir, "origin/main") {
+		out, err := gitutil.RunOutput(ctx, dir, "rev-list", "--count", "origin/main..main")
+		if err != nil {
+			return domain.Error(err, "count unpushed staging commits", slog.String("path", dir))
+		}
+		if out == "0" {
+			return nil
+		}
+	}
+
+	slog.InfoContext(ctx, "pushing previously unpushed staging commits", slog.String("path", dir))
+	if err := gitutil.Run(ctx, dir, "push", "origin", "main"); err != nil {
+		return domain.Error(err, "push staging changes", slog.String("path", dir))
+	}
+	return nil
+}
+
+func refExists(ctx context.Context, dir, ref string) bool {
+	_, err := gitutil.RunOutput(ctx, dir, "rev-parse", "--verify", "--quiet", ref)
+	return err == nil
 }
 
 func countChangedPaths(out string) int {
