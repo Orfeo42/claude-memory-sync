@@ -5,6 +5,8 @@ model="${SYNTH_MODEL:-sonnet}"
 
 . "$(dirname "$0")/lib.sh"
 
+echo "intake pass started"
+
 ensure_canonical_work
 
 tab=$(printf '\t')
@@ -82,6 +84,9 @@ process_memory_project() {
     done
   } > "$prompt_file"
 
+  candidate_count=$(awk -F"$tab" -v k="$key" '$1==k' "$memory_candidates" | wc -l | tr -d ' ')
+  echo "intake: judging project $key ($candidate_count candidate entries)"
+
   if ! "$claude_bin" -p --model "$model" < "$prompt_file" > "$out_file" 2>"$proj_scratch/err.txt"; then
     echo "intake.sh: claude invocation failed for project $key" >&2
     printf '%s\n' "$contributing_clients" | while IFS= read -r cid; do
@@ -142,6 +147,7 @@ for client_repo in "$repos_dir"/clients/*.git; do
   fi
 
   clients_processed=$((clients_processed + 1))
+  echo "intake: processing client $client_id"
   printf '%s\t%s\t%s\n' "$client_id" "$head" "$base" >> "$clients_meta"
 
   git --git-dir="$client_repo" diff --name-status "$base" "$head" | while IFS= read -r line; do
@@ -188,6 +194,7 @@ while IFS="$tab" read -r path winner_client ts; do
     fi
     mkdir -p "$(dirname "$dest")"
     cp "$tmp_file" "$dest"
+    echo "intake: config $path from client $winner_client"
     config_changed=1
   else
     if [ -f "$dest" ]; then
