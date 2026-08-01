@@ -166,6 +166,18 @@ func TestValidate(t *testing.T) {
 		assert.Contains(t, err.Error(), "global/skills/foo/creds.md")
 	})
 
+	t.Run("accepts docs that mention tokens in prose", func(t *testing.T) {
+		bareDir := newBareRepo(t)
+		workDir := newWorkTree(t)
+		execGit(t, workDir, "remote", "add", "origin", bareDir)
+		commitFile(t, workDir, "global/rules/forgejo.md", "Token: `~/.claude/skills/secrets/bin/get-secret forgejo` (probe chain).\nHeader: `Authorization: token <TOKEN>`.\n")
+
+		oldSHA, newSHA := pushCommit(t, workDir, bareDir)
+
+		err := githook.Validate(t.Context(), bareDir, strings.NewReader(updateLine(oldSHA, newSHA, "refs/heads/main")))
+		require.NoError(t, err)
+	})
+
 	t.Run("multi-ref push where one ref is bad fails the whole push", func(t *testing.T) {
 		bareDir := newBareRepo(t)
 		workDir := newWorkTree(t)

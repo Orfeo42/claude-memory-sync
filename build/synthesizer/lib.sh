@@ -3,7 +3,7 @@ work_dir="$data_dir/work/canonical"
 repos_dir="$data_dir/repos"
 
 # keep in sync with internal/githook
-secret_pattern='(api[_-]?key|secret|password|token)[[:space:]]*[:=][[:space:]]*[^[:space:]]{8,}|ghp_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----'
+secret_pattern='(api[_-]?key|secret|password|token)[[:space:]]*[:=][[:space:]]*[A-Za-z0-9_-]{16,}|\bghp_[A-Za-z0-9]{20,}|\bsk-[A-Za-z0-9_-]{20,}|\bAKIA[A-Z0-9]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----'
 
 extract_frontmatter_field() {
   awk -v field="$1" '
