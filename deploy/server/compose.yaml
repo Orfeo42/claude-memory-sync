@@ -40,5 +40,59 @@ services:
       - ${MEMORY_BACKUP_SSH_KEY:-/dev/null}:/root/.ssh/id_ed25519:ro
     entrypoint: ["git", "-C", "/data", "push", "origin", "storage"]
 
+  memory-browser:
+    image: jonashaag/klaus:latest
+    entrypoint:
+      [
+        "sh",
+        "-c",
+        "exec klaus --host 0.0.0.0 --port 80 --site-name memory /data/repos/canonical.git /data/repos/clients/*.git",
+      ]
+    volumes:
+      - memory-data:/data:ro
+    ports:
+      - "8081:80"
+    restart: unless-stopped
+
+  memory-vault-sync:
+    image: alpine/git
+    entrypoint:
+      [
+        "sh",
+        "-c",
+        "git config --global safe.directory '*'; while true; do if [ -d /vault/.git ]; then git -C /vault fetch origin && git -C /vault reset --hard origin/main; else find /vault -mindepth 1 -maxdepth 1 -exec rm -rf {} +; git clone /data/repos/canonical.git /vault; fi; sleep $${VAULT_SYNC_INTERVAL:-300}; done",
+      ]
+    environment:
+      VAULT_SYNC_INTERVAL: ${VAULT_SYNC_INTERVAL:-300}
+    volumes:
+      - memory-data:/data:ro
+      - memory-vault:/vault
+    restart: unless-stopped
+
+  memory-wiki:
+    image: sec77/perlite:latest
+    platform: linux/arm/v7
+    environment:
+      NOTES_PATH: Memory
+      SITE_TITLE: memory
+      SHOW_LOCAL_GRAPH: "true"
+      SHOW_TOC: "true"
+    volumes:
+      - perlite-app:/var/www/perlite
+      - memory-vault:/var/www/perlite/Memory:ro
+    restart: unless-stopped
+
+  memory-wiki-web:
+    image: nginx:stable
+    volumes:
+      - ./perlite.conf:/etc/nginx/conf.d/default.conf:ro
+      - perlite-app:/var/www/perlite:ro
+      - memory-vault:/var/www/perlite/Memory:ro
+    ports:
+      - "8082:80"
+    restart: unless-stopped
+
 volumes:
   memory-data:
+  memory-vault:
+  perlite-app:
