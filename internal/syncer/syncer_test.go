@@ -6,244 +6,128 @@ import (
 	"path/filepath"
 	"testing"
 
-	"claude-memory-sync/internal/manifest"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestAgentUpSync(t *testing.T) {
-	t.Run("PUTs new local file then DELETEs it once removed", func(t *testing.T) {
-		stateDir := t.TempDir()
-		fileDir := t.TempDir()
-		filePath := filepath.Join(fileDir, "CLAUDE.md")
-		require.NoError(t, os.WriteFile(filePath, []byte("hello"), 0o644))
+func TestRunCycleUpSync(t *testing.T) {
+	t.Run("first cycle pushes the whole whitelist", func(t *testing.T) {
+		cfg, base := newTestConfig(t, "host-a", "-home-orfeo42")
+		writeClaudeMD(t, cfg.ClaudeDir, "hello")
 
-		var putPath string
-		var putContent []byte
-		var deletePath string
-		mock := &MockHTTPClient{
-			PutClientFileFunc: func(_ context.Context, path string, content []byte) error {
-				putPath, putContent = path, content
-				return nil
-			},
-			DeleteClientFileFunc: func(_ context.Context, path string) error {
-				deletePath = path
-				return nil
-			},
-		}
+		agent := New(cfg)
+		require.NoError(t, agent.RunCycle(context.Background()))
 
-		agent := New(Config{StateDir: stateDir, ClientID: "host-a"}, mock)
-
-		local := manifest.Manifest{{Path: "global/CLAUDE.md", SHA256: "h1", Size: 5}}
-		localPaths := map[string]string{"global/CLAUDE.md": filePath}
-
-		require.NoError(t, agent.upSync(context.Background(), local, localPaths))
-		assert.Equal(t, "global/CLAUDE.md", putPath)
-		assert.Equal(t, "hello", string(putContent))
-		assert.Empty(t, deletePath)
-
-		require.NoError(t, agent.upSync(context.Background(), manifest.Manifest{}, map[string]string{}))
-		assert.Equal(t, "global/CLAUDE.md", deletePath)
+		clientDir := clientBareDir(base, "host-a")
+		assert.Equal(t, 1, bareCommitCount(t, clientDir))
+		assert.Contains(t, bareLsTree(t, clientDir), "global/CLAUDE.md")
 	})
 
-	t.Run("makes no calls when local matches the saved base", func(t *testing.T) {
-		stateDir := t.TempDir()
-		mock := &MockHTTPClient{
-			PutClientFileFunc: func(context.Context, string, []byte) error {
-				t.Fatal("unexpected PUT call")
-				return nil
-			},
-			DeleteClientFileFunc: func(context.Context, string) error {
-				t.Fatal("unexpected DELETE call")
-				return nil
-			},
-		}
-		agent := New(Config{StateDir: stateDir, ClientID: "host-a"}, mock)
+	t.Run("second unchanged cycle produces no new commit", func(t *testing.T) {
+		cfg, base := newTestConfig(t, "host-a", "-home-orfeo42")
+		writeClaudeMD(t, cfg.ClaudeDir, "hello")
 
-		local := manifest.Manifest{{Path: "global/CLAUDE.md", SHA256: "h1", Size: 5}}
-		require.NoError(t, saveManifest(agent.clientBasePath(), local))
+		agent := New(cfg)
+		require.NoError(t, agent.RunCycle(context.Background()))
+		require.NoError(t, agent.RunCycle(context.Background()))
 
-		require.NoError(t, agent.upSync(context.Background(), local, map[string]string{}))
+		clientDir := clientBareDir(base, "host-a")
+		assert.Equal(t, 1, bareCommitCount(t, clientDir))
 	})
 
-	t.Run("saves local manifest as the new base", func(t *testing.T) {
-		stateDir := t.TempDir()
-		mock := &MockHTTPClient{
-			PutClientFileFunc: func(context.Context, string, []byte) error { return nil },
-		}
-		agent := New(Config{StateDir: stateDir, ClientID: "host-a"}, mock)
+	t.Run("editing local file produces a new commit with the changed path", func(t *testing.T) {
+		cfg, base := newTestConfig(t, "host-a", "-home-orfeo42")
+		writeClaudeMD(t, cfg.ClaudeDir, "hello")
 
-		fileDir := t.TempDir()
-		filePath := filepath.Join(fileDir, "CLAUDE.md")
-		require.NoError(t, os.WriteFile(filePath, []byte("hello"), 0o644))
-		local := manifest.Manifest{{Path: "global/CLAUDE.md", SHA256: "h1", Size: 5}}
+		agent := New(cfg)
+		require.NoError(t, agent.RunCycle(context.Background()))
 
-		require.NoError(t, agent.upSync(context.Background(), local, map[string]string{"global/CLAUDE.md": filePath}))
+		writeClaudeMD(t, cfg.ClaudeDir, "hello updated")
+		require.NoError(t, agent.RunCycle(context.Background()))
 
-		saved, err := loadManifest(agent.clientBasePath())
-		require.NoError(t, err)
-		assert.Equal(t, local, saved)
+		clientDir := clientBareDir(base, "host-a")
+		assert.Equal(t, 2, bareCommitCount(t, clientDir))
+		assert.Contains(t, bareHeadDiffPaths(t, clientDir), "global/CLAUDE.md")
+	})
+
+	t.Run("deleting local file removes it from client tree", func(t *testing.T) {
+		cfg, base := newTestConfig(t, "host-a", "-home-orfeo42")
+		writeClaudeMD(t, cfg.ClaudeDir, "hello")
+
+		agent := New(cfg)
+		require.NoError(t, agent.RunCycle(context.Background()))
+
+		require.NoError(t, os.Remove(filepath.Join(cfg.ClaudeDir, "CLAUDE.md")))
+		require.NoError(t, agent.RunCycle(context.Background()))
+
+		clientDir := clientBareDir(base, "host-a")
+		assert.NotContains(t, bareLsTree(t, clientDir), "global/CLAUDE.md")
 	})
 }
 
-func TestAgentDownSync(t *testing.T) {
-	t.Run("applies canonical changed file when local unchanged", func(t *testing.T) {
-		claudeDir := t.TempDir()
-		stateDir := t.TempDir()
+func TestRunCycleDownSync(t *testing.T) {
+	t.Run("applies canonical file to mapped local path", func(t *testing.T) {
+		cfg, base := newTestConfig(t, "host-a", "-home-orfeo42")
 
-		mock := &MockHTTPClient{
-			CanonicalTreeFunc: func(context.Context) (manifest.Manifest, error) {
-				return manifest.Manifest{{Path: "global/CLAUDE.md", SHA256: "h2", Size: 3}}, nil
-			},
-			GetCanonicalFileFunc: func(_ context.Context, path string) ([]byte, error) {
-				require.Equal(t, "global/CLAUDE.md", path)
-				return []byte("new"), nil
-			},
-		}
-		agent := New(Config{ClaudeDir: claudeDir, StateDir: stateDir, SlugPrefix: "-home-orfeo42"}, mock)
+		seedBareFile(t, canonicalBareDir(base), "global/rules/example.md", "rule content")
 
-		require.NoError(t, agent.downSync(context.Background(), manifest.Manifest{}))
+		agent := New(cfg)
+		require.NoError(t, agent.RunCycle(context.Background()))
 
-		content, err := os.ReadFile(filepath.Join(claudeDir, "CLAUDE.md"))
+		content, err := os.ReadFile(filepath.Join(cfg.ClaudeDir, "rules", "example.md"))
 		require.NoError(t, err)
-		assert.Equal(t, "new", string(content))
+		assert.Equal(t, "rule content", string(content))
 	})
 
-	t.Run("deletes local file when canonical deleted and local unchanged", func(t *testing.T) {
-		claudeDir := t.TempDir()
-		stateDir := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "CLAUDE.md"), []byte("old"), 0o644))
+	t.Run("propagates canonical delete to local", func(t *testing.T) {
+		cfg, base := newTestConfig(t, "host-a", "-home-orfeo42")
 
-		canonicalBase := manifest.Manifest{{Path: "global/CLAUDE.md", SHA256: "h1", Size: 3}}
-		require.NoError(t, saveManifest(filepath.Join(stateDir, canonicalBaseFile), canonicalBase))
+		seedBareFile(t, canonicalBareDir(base), "global/rules/example.md", "rule content")
 
-		mock := &MockHTTPClient{
-			CanonicalTreeFunc: func(context.Context) (manifest.Manifest, error) {
-				return manifest.Manifest{}, nil
-			},
-		}
-		agent := New(Config{ClaudeDir: claudeDir, StateDir: stateDir, SlugPrefix: "-home-orfeo42"}, mock)
+		agent := New(cfg)
+		require.NoError(t, agent.RunCycle(context.Background()))
 
-		local := manifest.Manifest{{Path: "global/CLAUDE.md", SHA256: "h1", Size: 3}}
-		require.NoError(t, agent.downSync(context.Background(), local))
+		localPath := filepath.Join(cfg.ClaudeDir, "rules", "example.md")
+		require.FileExists(t, localPath)
 
-		_, statErr := os.Stat(filepath.Join(claudeDir, "CLAUDE.md"))
+		removeBareFile(t, canonicalBareDir(base), "global/rules/example.md")
+		require.NoError(t, agent.RunCycle(context.Background()))
+
+		_, statErr := os.Stat(localPath)
 		assert.True(t, os.IsNotExist(statErr))
 	})
 
-	t.Run("local wins: skips update when both local and canonical changed", func(t *testing.T) {
-		claudeDir := t.TempDir()
-		stateDir := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "CLAUDE.md"), []byte("local-edit"), 0o644))
+	t.Run("local wins when both local and canonical changed", func(t *testing.T) {
+		cfg, base := newTestConfig(t, "host-a", "-home-orfeo42")
 
-		canonicalBase := manifest.Manifest{{Path: "global/CLAUDE.md", SHA256: "base", Size: 3}}
-		require.NoError(t, saveManifest(filepath.Join(stateDir, canonicalBaseFile), canonicalBase))
+		seedBareFile(t, canonicalBareDir(base), "global/rules/example.md", "rule content")
 
-		mock := &MockHTTPClient{
-			CanonicalTreeFunc: func(context.Context) (manifest.Manifest, error) {
-				return manifest.Manifest{{Path: "global/CLAUDE.md", SHA256: "remote-new", Size: 3}}, nil
-			},
-			GetCanonicalFileFunc: func(context.Context, string) ([]byte, error) {
-				t.Fatal("should not fetch canonical file when local wins")
-				return nil, nil
-			},
-		}
-		agent := New(Config{ClaudeDir: claudeDir, StateDir: stateDir, SlugPrefix: "-home-orfeo42"}, mock)
+		agent := New(cfg)
+		require.NoError(t, agent.RunCycle(context.Background()))
 
-		local := manifest.Manifest{{Path: "global/CLAUDE.md", SHA256: "local-new", Size: 3}}
-		require.NoError(t, agent.downSync(context.Background(), local))
-
-		content, err := os.ReadFile(filepath.Join(claudeDir, "CLAUDE.md"))
-		require.NoError(t, err)
-		assert.Equal(t, "local-edit", string(content))
-	})
-
-	t.Run("deletion vs never-had: canonical file absent that was never synced causes no action", func(t *testing.T) {
-		claudeDir := t.TempDir()
-		stateDir := t.TempDir()
-
-		mock := &MockHTTPClient{
-			CanonicalTreeFunc: func(context.Context) (manifest.Manifest, error) {
-				return manifest.Manifest{}, nil
-			},
-		}
-		agent := New(Config{ClaudeDir: claudeDir, StateDir: stateDir, SlugPrefix: "-home-orfeo42"}, mock)
-
-		require.NoError(t, agent.downSync(context.Background(), manifest.Manifest{}))
-
-		entries, err := os.ReadDir(claudeDir)
-		require.NoError(t, err)
-		assert.Empty(t, entries)
-	})
-
-	t.Run("saves canonical tree as the new base", func(t *testing.T) {
-		claudeDir := t.TempDir()
-		stateDir := t.TempDir()
-
-		canonicalCurrent := manifest.Manifest{{Path: "global/CLAUDE.md", SHA256: "h2", Size: 3}}
-		mock := &MockHTTPClient{
-			CanonicalTreeFunc: func(context.Context) (manifest.Manifest, error) {
-				return canonicalCurrent, nil
-			},
-			GetCanonicalFileFunc: func(context.Context, string) ([]byte, error) {
-				return []byte("new"), nil
-			},
-		}
-		agent := New(Config{ClaudeDir: claudeDir, StateDir: stateDir, SlugPrefix: "-home-orfeo42"}, mock)
-
-		require.NoError(t, agent.downSync(context.Background(), manifest.Manifest{}))
-
-		saved, err := loadManifest(agent.canonicalBasePath())
-		require.NoError(t, err)
-		assert.Equal(t, canonicalCurrent, saved)
-	})
-}
-
-func TestAgentRunCycle(t *testing.T) {
-	t.Run("runs up-sync before down-sync each cycle", func(t *testing.T) {
-		claudeDir := t.TempDir()
-		stateDir := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "CLAUDE.md"), []byte("local content"), 0o644))
-
-		var order []string
-		mock := &MockHTTPClient{
-			PutClientFileFunc: func(context.Context, string, []byte) error {
-				order = append(order, "put")
-				return nil
-			},
-			DeleteClientFileFunc: func(context.Context, string) error {
-				order = append(order, "delete")
-				return nil
-			},
-			CanonicalTreeFunc: func(context.Context) (manifest.Manifest, error) {
-				order = append(order, "canonicalTree")
-				return manifest.Manifest{}, nil
-			},
-			GetCanonicalFileFunc: func(context.Context, string) ([]byte, error) {
-				order = append(order, "getCanonical")
-				return nil, nil
-			},
-		}
-
-		agent := New(Config{ClaudeDir: claudeDir, StateDir: stateDir, SlugPrefix: "-home-orfeo42", ClientID: "host-a"}, mock)
+		localPath := filepath.Join(cfg.ClaudeDir, "rules", "example.md")
+		require.NoError(t, os.WriteFile(localPath, []byte("local edit"), 0o644))
+		seedBareFile(t, canonicalBareDir(base), "global/rules/example.md", "remote edit")
 
 		require.NoError(t, agent.RunCycle(context.Background()))
 
-		require.Len(t, order, 2)
-		assert.Equal(t, "put", order[0])
-		assert.Equal(t, "canonicalTree", order[1])
+		content, err := os.ReadFile(localPath)
+		require.NoError(t, err)
+		assert.Equal(t, "local edit", string(content))
 	})
+}
 
-	t.Run("propagates scan errors", func(t *testing.T) {
-		claudeDir := filepath.Join(t.TempDir(), "CLAUDE.md")
-		require.NoError(t, os.WriteFile(claudeDir, []byte("not a dir"), 0o644))
-		stateDir := t.TempDir()
+func TestRunCycleEmptyCanonical(t *testing.T) {
+	t.Run("succeeds with nothing applied when canonical has no commits yet", func(t *testing.T) {
+		cfg, _ := newTestConfig(t, "host-a", "-home-orfeo42")
+		writeClaudeMD(t, cfg.ClaudeDir, "hello")
 
-		mock := &MockHTTPClient{}
-		agent := New(Config{ClaudeDir: claudeDir, StateDir: stateDir, SlugPrefix: "-home-orfeo42", ClientID: "host-a"}, mock)
+		agent := New(cfg)
+		require.NoError(t, agent.RunCycle(context.Background()))
 
-		err := agent.RunCycle(context.Background())
-		require.Error(t, err)
+		entries, err := os.ReadDir(cfg.ClaudeDir)
+		require.NoError(t, err)
+		assert.Len(t, entries, 1)
+		assert.Equal(t, "CLAUDE.md", entries[0].Name())
 	})
 }

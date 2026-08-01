@@ -1,5 +1,12 @@
 # Phase 1 — containerized hub sync (Go API server + Docker agents)
 
+> **SUPERSEDED (2026-08-01)** by [docs/08 — git-native sync](08-git-native-sync.md):
+> REST per-file transport and the dual-write mirror into `canonical/` are
+> replaced by git smart-HTTP push/fetch and an async intake pass. This doc
+> stays as the historical record of the v1 design; the storage-model ideas
+> (per-client namespaces, canonical-only down-sync, whitelist, base-manifest
+> 3-way diff for down-sync) carry over.
+
 ## Decision record — host-native design rejected (2026-07-19)
 
 The first executed design (Syncthing P2P + bash `rsync` scripts + systemd

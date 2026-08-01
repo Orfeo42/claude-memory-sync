@@ -7,9 +7,17 @@ following facts.
 ## Goal
 
 Enable the existing `memory-backup` compose service (profile `backup`,
-`deploy/server/compose.yaml`) to push the storage repo (branch
-`storage`) from the Pi to a private GitHub repo. GitHub is backup only
-— never the sync path (README ground rule).
+`deploy/server/compose.yaml`) to push the storage from the Pi to a
+private GitHub repo. GitHub is backup only — never the sync path
+(README ground rule).
+
+**Layout update 2026-08-01 (git-native v2, docs/08):** storage is no
+longer one working repo on branch `storage` — it is bare repos under
+`/data/repos/`. The backup push becomes
+`git -C /data/repos/canonical.git push --mirror <remote>` (canonical is
+the curated knowledge base; optionally also mirror
+`/data/repos/clients/*.git` for raw history). Update the service
+entrypoint and the `remote add` step accordingly when implementing.
 
 ## Known gotchas (discovered 2026-07-26, fix during implementation)
 

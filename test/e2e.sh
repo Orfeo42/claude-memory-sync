@@ -5,23 +5,31 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUN_ID="$$"
 NET="cms-e2e-net-${RUN_ID}"
 SERVER_NAME="cms-e2e-server-${RUN_ID}"
+SERVER_DATA_VOL="cms-e2e-server-data-${RUN_ID}"
+STATE_VOL_A="cms-e2e-state-a-${RUN_ID}"
+STATE_VOL_B="cms-e2e-state-b-${RUN_ID}"
 WORKDIR="$(mktemp -d)"
+TOKEN="e2e-token"
+
+SLUG_A="-home-e2e-a"
+SLUG_B="-home-e2e-b"
 
 PASS=0
 FAIL=0
 
-LOCAL_CLAUDE_A="local claude content for machine-a"
-CANONICAL_CLAUDE="canonical claude content seeded on hub"
-LOCAL_RULE_X="rule x content"
-LOCAL_MEMORY="proj1 memory content v1"
-CANONICAL_EXTRA="canonical extra rule content"
-LOCAL_CLAUDE_B="local claude content for machine-b"
-LOCAL_RULE_Y="rule y content"
-LOCAL_NOTES_B="proj2 notes content"
+CLAUDE_A="local claude content for machine-a"
+CLAUDE_B="local claude content for machine-b"
+RULE_A="rule content from machine-a"
+SKILL_A="Demo skill body from machine-a."
+ENTRY_A="Entry A content from machine-a."
+ENTRY_B="Entry B content from machine-b."
 
 cleanup() {
   docker rm -f "$SERVER_NAME" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
+  docker volume rm "$SERVER_DATA_VOL" >/dev/null 2>&1 || true
+  docker volume rm "$STATE_VOL_A" >/dev/null 2>&1 || true
+  docker volume rm "$STATE_VOL_B" >/dev/null 2>&1 || true
   rm -rf "$WORKDIR"
 }
 trap cleanup EXIT
@@ -68,22 +76,30 @@ assert_eq() {
   fi
 }
 
-server_cat() {
-  docker exec "$SERVER_NAME" cat "$1" 2>/dev/null || true
+assert_contains() {
+  local desc="$1" needle="$2" haystack="$3"
+  if printf '%s' "$haystack" | grep -qF "$needle"; then
+    record 0 "$desc"
+  else
+    echo "  needle:   [$needle]"
+    echo "  haystack: [$haystack]"
+    record 1 "$desc"
+  fi
 }
 
 build_images() {
   docker build -f "$ROOT/build/server.Dockerfile" -t memory-server:e2e "$ROOT"
   docker build -f "$ROOT/build/agent.Dockerfile" -t memory-agent:e2e "$ROOT"
+  docker build -f "$ROOT/build/synthesizer.Dockerfile" -t memory-synthesizer:e2e "$ROOT"
 }
 
 start_server() {
-  mkdir -p "$WORKDIR/server-data"
-  chmod 777 "$WORKDIR/server-data"
+  docker volume create "$SERVER_DATA_VOL" >/dev/null
   docker network create "$NET" >/dev/null
   docker run -d --name "$SERVER_NAME" --network "$NET" \
-    -e MEMORY_TOKEN=e2etoken \
-    -v "$WORKDIR/server-data:/data" \
+    -p 127.0.0.1:0:8080 \
+    -e MEMORY_TOKEN="$TOKEN" \
+    -v "$SERVER_DATA_VOL:/data" \
     memory-server:e2e >/dev/null
 }
 
@@ -99,137 +115,228 @@ wait_for_server() {
   exit 1
 }
 
-seed_canonical() {
-  docker exec "$SERVER_NAME" mkdir -p /data/canonical/global/rules
-  printf '%s' "$CANONICAL_CLAUDE" | docker exec -i "$SERVER_NAME" sh -c 'cat > /data/canonical/global/CLAUDE.md'
-  printf '%s' "$CANONICAL_EXTRA" | docker exec -i "$SERVER_NAME" sh -c 'cat > /data/canonical/global/rules/extra.md'
-  docker exec "$SERVER_NAME" git -C /data add -A
-  docker exec "$SERVER_NAME" git -C /data commit -m seed >/dev/null
+server_host_url() {
+  local addr
+  addr="$(docker port "$SERVER_NAME" 8080/tcp | head -n1)"
+  printf 'http://%s' "$addr"
+}
+
+git_ls_tree() {
+  local repo="$1"
+  docker exec "$SERVER_NAME" git --git-dir="/data/repos/$repo" ls-tree -r main --name-only 2>/dev/null || true
+}
+
+git_show() {
+  local repo="$1" rev="$2" path="$3"
+  docker exec "$SERVER_NAME" git --git-dir="/data/repos/$repo" show "$rev:$path" 2>/dev/null || true
+}
+
+git_ref() {
+  local repo="$1" ref="$2"
+  docker exec "$SERVER_NAME" git --git-dir="/data/repos/$repo" rev-parse --verify --quiet "$ref" 2>/dev/null || true
 }
 
 make_fixture_a() {
-  mkdir -p "$FIXTURE_A/rules" "$FIXTURE_A/projects/-home-e2e-proj1/memory"
-  printf '%s' "$LOCAL_CLAUDE_A" > "$FIXTURE_A/CLAUDE.md"
-  printf '%s' "$LOCAL_RULE_X" > "$FIXTURE_A/rules/x.md"
-  printf '%s' "$LOCAL_MEMORY" > "$FIXTURE_A/projects/-home-e2e-proj1/memory/MEMORY.md"
-  printf '%s' "decoy session data" > "$FIXTURE_A/projects/-home-e2e-proj1/session.jsonl"
+  mkdir -p "$FIXTURE_A/rules" "$FIXTURE_A/skills/demo" "$FIXTURE_A/projects/$SLUG_A/memory"
+  printf '%s\n' "$CLAUDE_A" > "$FIXTURE_A/CLAUDE.md"
+  printf '%s\n' "$RULE_A" > "$FIXTURE_A/rules/test-rule.md"
+  printf -- '---\nname: demo\ndescription: demo skill\n---\n%s\n' "$SKILL_A" > "$FIXTURE_A/skills/demo/SKILL.md"
+  printf -- '---\nname: entry-a\ndescription: entry from machine-a\n---\n%s\n' "$ENTRY_A" > "$FIXTURE_A/projects/$SLUG_A/memory/entry-a.md"
+  printf '# Memory index\n\n- [entry-a](entry-a.md) — entry from machine-a\n' > "$FIXTURE_A/projects/$SLUG_A/memory/MEMORY.md"
   chmod -R 777 "$FIXTURE_A"
 }
 
 make_fixture_b() {
-  mkdir -p "$FIXTURE_B/rules" "$FIXTURE_B/projects/-home-e2e-proj2/memory"
-  printf '%s' "$LOCAL_CLAUDE_B" > "$FIXTURE_B/CLAUDE.md"
-  printf '%s' "$LOCAL_RULE_Y" > "$FIXTURE_B/rules/y.md"
-  printf '%s' "$LOCAL_NOTES_B" > "$FIXTURE_B/projects/-home-e2e-proj2/memory/NOTES.md"
+  mkdir -p "$FIXTURE_B/projects/$SLUG_B/memory"
+  printf '%s\n' "$CLAUDE_B" > "$FIXTURE_B/CLAUDE.md"
+  printf -- '---\nname: entry-b\ndescription: entry from machine-b\n---\n%s\n' "$ENTRY_B" > "$FIXTURE_B/projects/$SLUG_B/memory/entry-b.md"
+  printf '# Memory index\n\n- [entry-b](entry-b.md) — entry from machine-b\n' > "$FIXTURE_B/projects/$SLUG_B/memory/MEMORY.md"
   chmod -R 777 "$FIXTURE_B"
 }
 
+make_stub_claude() {
+  cat > "$WORKDIR/stub-claude.sh" <<'EOF'
+#!/bin/sh
+cat >/dev/null
+cat <<'STUB'
+===FILE: merged-entry.md===
+---
+name: merged-entry
+description: stub merged entry from intake
+metadata:
+  type: reference
+---
+Stub merged content produced by the e2e test's claude stub.
+===END===
+STUB
+EOF
+  chmod 755 "$WORKDIR/stub-claude.sh"
+}
+
 run_agent() {
-  local client_id="$1" fixture="$2" state="$3"
-  mkdir -p "$state"
-  chmod -R 777 "$state"
+  local client_id="$1" fixture="$2" slug_prefix="$3" state_vol="$4"
   docker run --rm --network "$NET" \
     -e MEMORY_SERVER_URL="http://${SERVER_NAME}:8080" \
-    -e MEMORY_TOKEN=e2etoken \
+    -e MEMORY_TOKEN="$TOKEN" \
     -e MEMORY_CLIENT_ID="$client_id" \
-    -e MEMORY_SLUG_PREFIX=-home-e2e \
+    -e MEMORY_SLUG_PREFIX="$slug_prefix" \
     -e MEMORY_RUN_ONCE=true \
     -v "$fixture:/claude" \
-    -v "$state:/state" \
+    -v "$state_vol:/state" \
     memory-agent:e2e
 }
 
+run_intake() {
+  local logfile="$1"
+  docker run --rm \
+    -v "$SERVER_DATA_VOL:/data" \
+    -v "$WORKDIR/stub-claude.sh:/usr/local/bin/stub-claude.sh:ro" \
+    -e CLAUDE_CODE_OAUTH_TOKEN=dummy-oauth-token \
+    -e INTAKE_RUN_ONCE=true \
+    -e SYNTH_CLAUDE_BIN=/usr/local/bin/stub-claude.sh \
+    --entrypoint /usr/local/bin/intake-run.sh \
+    memory-synthesizer:e2e > "$logfile" 2>&1
+}
+
+push_disallowed_path() {
+  local repo_dir="$WORKDIR/host-repo-disallowed"
+  rm -rf "$repo_dir"
+  mkdir -p "$repo_dir/sessions"
+  printf 'decoy session data\n' > "$repo_dir/sessions/evil.jsonl"
+  git -C "$repo_dir" init -q -b main
+  git -C "$repo_dir" config user.email "e2e@example.com"
+  git -C "$repo_dir" config user.name "e2e"
+  git -C "$repo_dir" add -A
+  git -C "$repo_dir" commit -q -m "evil"
+  git -C "$repo_dir" -c http.extraHeader="Authorization: Bearer $TOKEN" \
+    push "$(server_host_url)/git/clients/machine-c.git" main
+}
+
+push_to_canonical() {
+  local repo_dir="$WORKDIR/host-repo-canonical"
+  rm -rf "$repo_dir"
+  mkdir -p "$repo_dir"
+  printf 'attempted direct canonical write\n' > "$repo_dir/CLAUDE.md"
+  git -C "$repo_dir" init -q -b main
+  git -C "$repo_dir" config user.email "e2e@example.com"
+  git -C "$repo_dir" config user.name "e2e"
+  git -C "$repo_dir" add -A
+  git -C "$repo_dir" commit -q -m "attempt"
+  git -C "$repo_dir" -c http.extraHeader="Authorization: Bearer $TOKEN" \
+    push "$(server_host_url)/git/canonical.git" main
+}
+
 assertions_after_agent_a() {
-  assert_true "a: machine-a MEMORY.md exists on server" \
-    docker exec "$SERVER_NAME" test -f /data/clients/machine-a/projects/HOME-proj1/memory/MEMORY.md
-  assert_eq "a: machine-a MEMORY.md content matches" \
-    "$LOCAL_MEMORY" "$(server_cat /data/clients/machine-a/projects/HOME-proj1/memory/MEMORY.md)"
-
-  assert_true "b: machine-a global/CLAUDE.md exists on server" \
-    docker exec "$SERVER_NAME" test -f /data/clients/machine-a/global/CLAUDE.md
-  assert_true "b: machine-a global/rules/x.md exists on server" \
-    docker exec "$SERVER_NAME" test -f /data/clients/machine-a/global/rules/x.md
-
-  local found
-  found="$(docker exec "$SERVER_NAME" sh -c 'find /data/clients -name session.jsonl')"
-  assert_eq "c: no session.jsonl under /data/clients" "" "$found"
-
-  assert_eq "d: fixture CLAUDE.md unchanged (local wins)" \
-    "$LOCAL_CLAUDE_A" "$(cat "$FIXTURE_A/CLAUDE.md")"
-  assert_eq "d: fixture received canonical rules/extra.md" \
-    "$CANONICAL_EXTRA" "$(cat "$FIXTURE_A/rules/extra.md" 2>/dev/null || true)"
+  local tree
+  tree="$(git_ls_tree clients/machine-a.git)"
+  assert_contains "3: machine-a repo commit contains global/CLAUDE.md" "global/CLAUDE.md" "$tree"
+  assert_contains "3: machine-a repo commit contains projects/HOME/memory/entry-a.md" "projects/HOME/memory/entry-a.md" "$tree"
+  assert_contains "3: machine-a repo commit contains global/rules/test-rule.md" "global/rules/test-rule.md" "$tree"
+  assert_contains "3: machine-a repo commit contains global/skills/demo/SKILL.md" "global/skills/demo/SKILL.md" "$tree"
 }
 
 assertions_after_agent_b() {
-  assert_true "e: machine-b CLAUDE.md exists on server" \
-    docker exec "$SERVER_NAME" test -f /data/clients/machine-b/global/CLAUDE.md
-  assert_eq "e: machine-b CLAUDE.md content matches" \
-    "$LOCAL_CLAUDE_B" "$(server_cat /data/clients/machine-b/global/CLAUDE.md)"
-  assert_true "e: machine-b rules/y.md exists on server" \
-    docker exec "$SERVER_NAME" test -f /data/clients/machine-b/global/rules/y.md
-  assert_true "e: machine-b NOTES.md exists on server" \
-    docker exec "$SERVER_NAME" test -f /data/clients/machine-b/projects/HOME-proj2/memory/NOTES.md
-  assert_eq "e: machine-b NOTES.md content matches" \
-    "$LOCAL_NOTES_B" "$(server_cat /data/clients/machine-b/projects/HOME-proj2/memory/NOTES.md)"
-
-  assert_eq "e: machine-a namespace untouched by machine-b run (content)" \
-    "$LOCAL_CLAUDE_A" "$(server_cat /data/clients/machine-a/global/CLAUDE.md)"
-  assert_eq "e: machine-a namespace untouched by machine-b run (mtime+size)" \
-    "$MACHINE_A_STAT_BEFORE" "$(docker exec "$SERVER_NAME" stat -c '%Y %s' /data/clients/machine-a/global/CLAUDE.md)"
-
-  assert_eq "e: machine-b fixture received canonical rules/extra.md" \
-    "$CANONICAL_EXTRA" "$(cat "$FIXTURE_B/rules/extra.md" 2>/dev/null || true)"
+  local tree
+  tree="$(git_ls_tree clients/machine-b.git)"
+  assert_contains "4: machine-b repo commit contains global/CLAUDE.md" "global/CLAUDE.md" "$tree"
+  assert_contains "4: machine-b repo commit contains projects/HOME/memory/entry-b.md" "projects/HOME/memory/entry-b.md" "$tree"
 }
 
-assertions_after_delete() {
-  assert_false "f: machine-a MEMORY.md deleted on server" \
-    docker exec "$SERVER_NAME" test -f /data/clients/machine-a/projects/HOME-proj1/memory/MEMORY.md
-
-  local deleted
-  deleted="$(docker exec "$SERVER_NAME" git -C /data log --diff-filter=D --name-only --pretty=format: -- clients/machine-a/projects/HOME-proj1/memory/MEMORY.md)"
-  assert_true "f: deletion recoverable in git log" test -n "$deleted"
+assertions_whitelist_rejection() {
+  assert_false "5: push with disallowed path (sessions/evil.jsonl) is rejected" push_disallowed_path
+  local main_ref
+  main_ref="$(git_ref clients/machine-c.git refs/heads/main)"
+  assert_eq "5: machine-c repo has no main ref after rejected push" "" "$main_ref"
 }
 
-assertions_git_log() {
+assertions_canonical_push_blocked() {
+  assert_false "6: push to canonical.git over http is rejected" push_to_canonical
+}
+
+assertions_after_intake_run1() {
+  local log claude_content memory_tree
+  log="$(cat "$WORKDIR/intake1.log")"
+  echo "$log"
+  assert_contains "7: intake pass 1 completed" "intake pass completed" "$log"
+
+  claude_content="$(git_show canonical.git main global/CLAUDE.md)"
+  assert_eq "7: canonical global/CLAUDE.md mechanically merged from newer client (machine-b)" "$CLAUDE_B" "$claude_content"
+
+  assert_eq "7: canonical global/rules/test-rule.md merged from machine-a" "$RULE_A" "$(git_show canonical.git main global/rules/test-rule.md)"
+
+  memory_tree="$(git_ls_tree canonical.git)"
+  assert_contains "7: canonical has intake-produced projects/HOME/memory/merged-entry.md" "projects/HOME/memory/merged-entry.md" "$memory_tree"
+
+  local memory_index
+  memory_index="$(git_show canonical.git main projects/HOME/memory/MEMORY.md)"
+  assert_contains "7: canonical MEMORY.md rebuilt with merged-entry reference" "merged-entry.md" "$memory_index"
+
+  local marker_a marker_b
+  marker_a="$(git_ref clients/machine-a.git refs/intake/last-processed)"
+  marker_b="$(git_ref clients/machine-b.git refs/intake/last-processed)"
+  assert_true "7: intake marker ref set on machine-a repo" test -n "$marker_a"
+  assert_true "7: intake marker ref set on machine-b repo" test -n "$marker_b"
+}
+
+assertions_after_downsync_a() {
+  assert_true "8: agent A down-synced intake merged-entry.md into local project memory" \
+    test -f "$FIXTURE_A/projects/$SLUG_A/memory/merged-entry.md"
+  assert_contains "8: down-synced merged-entry.md has stub content" \
+    "Stub merged content produced by the e2e test's claude stub." \
+    "$(cat "$FIXTURE_A/projects/$SLUG_A/memory/merged-entry.md" 2>/dev/null || true)"
+  assert_eq "8: agent A's own CLAUDE.md is untouched (local wins)" \
+    "$CLAUDE_A" "$(head -n1 "$FIXTURE_A/CLAUDE.md")"
+}
+
+assertions_after_intake_run2() {
   local log
-  log="$(docker exec "$SERVER_NAME" git -C /data log --oneline --all)"
-  if printf '%s' "$log" | grep -q "sync: machine-a "; then
-    record 0 "g: commit messages present for machine-a"
-  else
-    record 1 "g: commit messages present for machine-a"
-  fi
-  if printf '%s' "$log" | grep -q "sync: machine-b "; then
-    record 0 "g: commit messages present for machine-b"
-  else
-    record 1 "g: commit messages present for machine-b"
-  fi
+  log="$(cat "$WORKDIR/intake2.log")"
+  echo "$log"
+  assert_contains "9: second intake pass completed" "intake pass completed" "$log"
+  assert_contains "9: second intake pass is a cheap no-op (no clients processed)" "clients_processed=0" "$log"
+  assert_eq "9: canonical.git head unchanged across cheap-skip intake pass" \
+    "$CANONICAL_HEAD_AFTER_RUN1" "$(git_ref canonical.git refs/heads/main)"
 }
 
 FIXTURE_A="$WORKDIR/fixture-a"
 FIXTURE_B="$WORKDIR/fixture-b"
-STATE_A="$WORKDIR/state-a"
-STATE_B="$WORKDIR/state-b"
 
+echo "== 1: build images =="
 build_images
+
+echo "== 2: start server =="
 start_server
 wait_for_server
-seed_canonical
 
+echo "== 3: agent A first run =="
 make_fixture_a
-run_agent machine-a "$FIXTURE_A" "$STATE_A"
+run_agent machine-a "$FIXTURE_A" "$SLUG_A" "$STATE_VOL_A"
 assertions_after_agent_a
 
-MACHINE_A_STAT_BEFORE="$(docker exec "$SERVER_NAME" stat -c '%Y %s' /data/clients/machine-a/global/CLAUDE.md)"
-
+echo "== 4: agent B first run (same canonical project key) =="
 make_fixture_b
-run_agent machine-b "$FIXTURE_B" "$STATE_B"
+run_agent machine-b "$FIXTURE_B" "$SLUG_B" "$STATE_VOL_B"
 assertions_after_agent_b
 
-rm -f "$FIXTURE_A/projects/-home-e2e-proj1/memory/MEMORY.md"
-run_agent machine-a "$FIXTURE_A" "$STATE_A"
-assertions_after_delete
+echo "== 5: whitelist rejection on client push =="
+assertions_whitelist_rejection
 
-assertions_git_log
+echo "== 6: canonical push blocked over http =="
+assertions_canonical_push_blocked
+
+echo "== 7: intake run (first pass) =="
+make_stub_claude
+run_intake "$WORKDIR/intake1.log"
+assertions_after_intake_run1
+CANONICAL_HEAD_AFTER_RUN1="$(git_ref canonical.git refs/heads/main)"
+
+echo "== 8: agent A down-sync picks up intake output =="
+run_agent machine-a "$FIXTURE_A" "$SLUG_A" "$STATE_VOL_A"
+assertions_after_downsync_a
+
+echo "== 9: intake run (second pass, cheap skip) =="
+run_intake "$WORKDIR/intake2.log"
+assertions_after_intake_run2
 
 echo "----"
 echo "PASS: $PASS FAIL: $FAIL"

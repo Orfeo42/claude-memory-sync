@@ -2,9 +2,12 @@
 
 Centralize Claude Code memory (`CLAUDE.md`, `rules/`, per-project
 `memory/`) across an open-ended number of personal machines. Hub model:
-a Go API server container on an always-on home box is the single sync
-point; each machine runs a Docker agent container (only per-machine
-dependency: Docker).
+a Go server container on an always-on home box is the single sync
+point, hosting bare git repos served over smart-HTTP; each machine runs
+a Docker agent container (only per-machine dependency: Docker) that
+commits its whitelisted `~/.claude` state to a local staging repo and
+pushes the difference. An async intake pass decides what enters the
+shared knowledge base (`canonical`); agents poll it back down.
 
 **This repo is CODE ONLY** (server, agent, deploy, docs). Memory
 content never lives here. Content locations: live files in `~/.claude`
@@ -16,23 +19,25 @@ Multi-step effort, not a one-shot build. Status per phase below.
 
 ## Phases
 
-| Phase | Doc                                                                                | Status                                    |
-| ----- | ---------------------------------------------------------------------------------- | ----------------------------------------- |
-| 0     | [.docs/00-repo-and-scaffold.md](.docs/00-repo-and-scaffold.md)                     | Done (2026-07-19)                         |
-| 1     | [.docs/01-hub-sync.md](.docs/01-hub-sync.md)                                       | Implemented + e2e green — rollout pending |
-| 2     | [.docs/02-plugin-harness-sharing.md](.docs/02-plugin-harness-sharing.md)           | 2a done (skills/agents sync); rest future |
-| 3     | [.docs/03-condense-dedup.md](.docs/03-condense-dedup.md)                           | Layer A done (canonical dual-write)       |
-| 4     | [.docs/04-usage-mining-rules.md](.docs/04-usage-mining-rules.md)                   | Future — context captured, not planned    |
-| 5     | [.docs/05-hot-cache-rollup.md](.docs/05-hot-cache-rollup.md)                       | Synthesizer done; hot cache + UI future   |
-| 6     | [.docs/06-transcript-knowledge-mining.md](.docs/06-transcript-knowledge-mining.md) | memory-mine skill done; backfill pending  |
-| 7     | [.docs/07-backup-remote.md](.docs/07-backup-remote.md)                             | Future — context captured, not planned    |
+| Phase | Doc                                                                                | Status                                                 |
+| ----- | ---------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| 0     | [.docs/00-repo-and-scaffold.md](.docs/00-repo-and-scaffold.md)                     | Done (2026-07-19)                                      |
+| 1     | [.docs/01-hub-sync.md](.docs/01-hub-sync.md)                                       | Superseded by phase 8 (kept as history)                |
+| 2     | [.docs/02-plugin-harness-sharing.md](.docs/02-plugin-harness-sharing.md)           | 2a done (skills/agents sync); rest future              |
+| 3     | [.docs/03-condense-dedup.md](.docs/03-condense-dedup.md)                           | Layer A = intake pass (phase 8); Layer B = synthesizer |
+| 4     | [.docs/04-usage-mining-rules.md](.docs/04-usage-mining-rules.md)                   | Future — context captured, not planned                 |
+| 5     | [.docs/05-hot-cache-rollup.md](.docs/05-hot-cache-rollup.md)                       | Synthesizer done; hot cache + UI future                |
+| 6     | [.docs/06-transcript-knowledge-mining.md](.docs/06-transcript-knowledge-mining.md) | memory-mine skill done; backfill done                  |
+| 7     | [.docs/07-backup-remote.md](.docs/07-backup-remote.md)                             | Future — context captured, not planned                 |
+| 8     | [.docs/08-git-native-sync.md](.docs/08-git-native-sync.md)                         | In implementation (v2 architecture)                    |
 
 ## Ground rules (apply to every phase)
 
-- Hub-based, containerized: sync goes through the home-box API server;
-  the only per-machine dependency is Docker. GitHub is never the sync
-  path — backup pushes happen server-side only. (Replaced the original
-  "local-first P2P" rule, 2026-07-19 — see .docs/01.)
+- Hub-based, containerized: sync goes through the home-box server (git
+  smart-HTTP since v2, see .docs/08); the only per-machine dependency
+  is Docker. GitHub is never the sync path — backup pushes happen
+  server-side only. (Replaced the original "local-first P2P" rule,
+  2026-07-19 — see .docs/01.)
 - Whitelist, not blacklist: only explicitly-listed paths ever leave
   `~/.claude`. A future Claude Code update adding new sensitive files under
   `~/.claude` must not silently get swept into sync.

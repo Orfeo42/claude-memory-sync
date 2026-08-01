@@ -9,10 +9,7 @@ import (
 	"claude-memory-sync/internal/manifest"
 )
 
-const (
-	clientBaseFile    = "client.json"
-	canonicalBaseFile = "canonical.json"
-)
+const canonicalBaseFile = "canonical.json"
 
 func loadManifest(path string) (manifest.Manifest, error) {
 	data, err := os.ReadFile(path)

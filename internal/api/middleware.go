@@ -31,3 +31,15 @@ func authMiddleware(api huma.API, token string) func(huma.Context, func(huma.Con
 		next(ctx)
 	}
 }
+
+func requireBearerToken(token string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		header := r.Header.Get("Authorization")
+		if !strings.HasPrefix(header, bearerPrefix) || header[len(bearerPrefix):] != token {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
