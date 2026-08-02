@@ -65,10 +65,8 @@ services:
     restart: unless-stopped
 
   windmill-worker:
-    image: claude-memory-sync-windmill-worker:latest
-    build:
-      context: ../..
-      dockerfile: build/windmill-worker.Dockerfile
+    image: ghcr.io/orfeo42/claude-memory-sync-windmill-worker:latest
+    pull_policy: "always"
     environment:
       DATABASE_URL: postgres://windmill:${WINDMILL_DB_PASSWORD:?}@windmill-db/windmill?sslmode=disable
       MODE: worker
