@@ -8,6 +8,6 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/memoryctl .
 
 FROM ghcr.io/windmill-labs/windmill:main
 USER root
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl && rm -rf /var/lib/apt/lists/*
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y --no-install-recommends nodejs && rm -rf /var/lib/apt/lists/* && npm install -g @anthropic-ai/claude-code
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN rm -f /usr/bin/claude /usr/local/bin/claude && npm install -g @anthropic-ai/claude-code && claude --version
 COPY --from=build /out/memoryctl /usr/local/bin/memoryctl
