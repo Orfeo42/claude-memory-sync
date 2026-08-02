@@ -40,61 +40,45 @@ services:
       - ${MEMORY_BACKUP_SSH_KEY:-/dev/null}:/root/.ssh/id_ed25519:ro
     entrypoint: ["git", "-C", "/data", "push", "origin", "storage"]
 
-  memory-browser:
-    image: jonashaag/klaus:latest
-    entrypoint:
-      [
-        "sh",
-        "-c",
-        "exec klaus --host 0.0.0.0 --port 80 --site-name memory /data/repos/canonical.git /data/repos/clients/*.git",
-      ]
+  memory-git:
+    image: codeberg.org/forgejo/forgejo:15-rootless
+    environment:
+      FORGEJO__security__INSTALL_LOCK: "true"
+      FORGEJO__database__DB_TYPE: sqlite3
+      FORGEJO__server__ROOT_URL: http://raspberry:8081/
+      FORGEJO__server__HTTP_PORT: "3000"
+      FORGEJO__server__DISABLE_SSH: "true"
+      FORGEJO__service__DISABLE_REGISTRATION: "true"
+      FORGEJO__service__REQUIRE_SIGNIN_VIEW: "false"
+      FORGEJO__repository__ENABLE_PUSH_CREATE_USER: "true"
+      FORGEJO__repository__DEFAULT_PUSH_CREATE_PRIVATE: "false"
+      FORGEJO__repository__DEFAULT_PRIVATE: public
     volumes:
-      - memory-data:/data:ro
+      - forgejo-data:/var/lib/gitea
+      - forgejo-config:/etc/gitea
     ports:
-      - "8081:80"
+      - "8081:3000"
     restart: unless-stopped
 
-  memory-vault-sync:
+  memory-git-mirror:
     image: alpine/git
+    depends_on:
+      - memory-git
     entrypoint:
       [
         "sh",
         "-c",
-        "git config --global safe.directory '*'; while true; do if [ -d /vault/.git ]; then git -C /vault fetch origin && git -C /vault reset --hard origin/main; else find /vault -mindepth 1 -maxdepth 1 -exec rm -rf {} +; git clone /data/repos/canonical.git /vault; fi; sleep $${VAULT_SYNC_INTERVAL:-300}; done",
+        "git config --global safe.directory '*'; while true; do for r in /data/repos/canonical.git /data/repos/clients/*.git; do [ -d \"$$r\" ] || continue; n=$$(basename \"$$r\" .git); case \"$$r\" in */clients/*) n=\"client-$$n\";; esac; git --git-dir=\"$$r\" push --mirror \"http://$$FORGEJO_MIRROR_USER:$$FORGEJO_MIRROR_PASSWORD@memory-git:3000/$$FORGEJO_MIRROR_USER/$$n.git\" >/dev/null 2>&1 || echo \"mirror push failed: $$n\"; done; sleep $${MIRROR_INTERVAL:-60}; done",
       ]
     environment:
-      VAULT_SYNC_INTERVAL: ${VAULT_SYNC_INTERVAL:-300}
+      FORGEJO_MIRROR_USER: ${FORGEJO_MIRROR_USER:?}
+      FORGEJO_MIRROR_PASSWORD: ${FORGEJO_MIRROR_PASSWORD:?}
+      MIRROR_INTERVAL: ${MIRROR_INTERVAL:-60}
     volumes:
       - memory-data:/data:ro
-      - memory-vault:/vault
-    restart: unless-stopped
-
-  memory-wiki:
-    image: sec77/perlite:latest
-    platform: linux/arm/v7
-    environment:
-      NOTES_PATH: Memory
-      SITE_TITLE: memory
-      SHOW_LOCAL_GRAPH: "true"
-      SHOW_TOC: "true"
-    volumes:
-      - perlite-app:/var/www/perlite
-      - memory-vault:/var/www/perlite/Memory:ro
-    restart: unless-stopped
-
-  memory-wiki-web:
-    image: nginx:stable
-    depends_on:
-      - memory-wiki
-    volumes:
-      - ./perlite.conf:/etc/nginx/conf.d/default.conf:ro
-      - perlite-app:/var/www/perlite:ro
-      - memory-vault:/var/www/perlite/Memory:ro
-    ports:
-      - "8082:80"
     restart: unless-stopped
 
 volumes:
   memory-data:
-  memory-vault:
-  perlite-app:
+  forgejo-data:
+  forgejo-config:
