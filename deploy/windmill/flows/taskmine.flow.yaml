@@ -1,0 +1,141 @@
+# Windmill OpenFlow template — import via the Windmill UI/CLI and expect to
+# adjust module/suspend syntax to match the running Windmill version. See
+# deploy/windmill/setup.md ("Flow YAML caveat") before trusting this file
+# verbatim.
+#
+# Schedule: weekly. Concurrency: 1 (serialize with itself).
+summary: memory-taskmine
+description: >
+  Harness-improvement miner: scans the whole canonical corpus for repeated
+  manual procedures worth turning into a reusable zsh function, script, or
+  Claude Code skill. Always proposal-only (global/skills/**), never
+  auto-applied. Prompt text lives in the Windmill variable
+  u/admin/taskmine_draft (default body: deploy/windmill/prompts/taskmine-draft.md).
+
+schema:
+  $schema: "https://json-schema.org/draft/2020-12/schema"
+  type: object
+  properties:
+    synth_model:
+      type: string
+      default: sonnet
+      description: claude -p --model value. Windmill variable u/admin/synth_model.
+    taskmine_draft_prompt:
+      type: string
+      default: "$var:u/admin/taskmine_draft"
+      description: deploy/windmill/prompts/taskmine-draft.md
+  required: []
+
+value:
+  # TODO verify: exact field names for the installed Windmill version.
+  concurrent_limit: 1
+  concurrency_time_window_s: 3600
+
+  modules:
+    - id: ensure_work
+      value:
+        type: rawscript
+        language: bash
+        content: |
+          set -euo pipefail
+          [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2; exit 1; }
+
+          memoryctl ensure-work --repos-dir /data/repos --work-dir /data/work/canonical
+          mkdir -p /tmp/proposals
+        input_transforms: {}
+
+    - id: draft
+      summary: mine the corpus for repeated manual procedures worth a skill
+      value:
+        type: rawscript
+        language: bash
+        content: |
+          set -euo pipefail
+          [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2; exit 1; }
+
+          prompt_file=$(mktemp)
+          trap 'rm -f "$prompt_file"' EXIT
+          printf '%s\n\n' "$WM_TASKMINE_PROMPT" > "$prompt_file"
+          memoryctl corpus digest --work-dir /data/work/canonical >> "$prompt_file"
+
+          claude -p --model "$WM_MODEL" < "$prompt_file" \
+            | memoryctl ops-apply --proposals-dir /tmp/proposals
+        input_transforms:
+          WM_TASKMINE_PROMPT:
+            type: javascript
+            expr: flow_input.taskmine_draft_prompt
+          WM_MODEL:
+            type: javascript
+            expr: flow_input.synth_model
+
+    - id: check_proposals
+      summary: any taskmine proposals staged in /tmp/proposals?
+      value:
+        type: rawscript
+        language: bash
+        content: |
+          set -euo pipefail
+          if find /tmp/proposals -type f 2>/dev/null | grep -q .; then
+            echo true
+          else
+            echo false
+          fi
+        input_transforms: {}
+
+    # TODO verify: branchone syntax (branches[].expr + branches[].modules,
+    # default[]) for the installed Windmill version.
+    - id: promote_if_approved
+      value:
+        type: branchone
+        branches:
+          - summary: proposals staged — ask for approval, then promote + push
+            expr: "results.check_proposals === 'true'"
+            modules:
+              - id: taskmine_approval
+                summary: >
+                  Approval gate. Payload lists every staged skill proposal
+                  path + content for operator review in the Windmill run UI.
+                  Resuming approves ALL currently staged proposals (v1 has
+                  no per-file selective approval — cancel the run instead
+                  of resuming to discard them).
+                value:
+                  type: rawscript
+                  language: bash
+                  content: |
+                    set -euo pipefail
+                    find /tmp/proposals -type f -print0 \
+                      | while IFS= read -r -d '' f; do
+                          printf -- '--- %s ---\n' "$f"
+                          cat "$f"
+                          printf '\n'
+                        done
+                  input_transforms: {}
+                # TODO verify: suspend config field names for the installed
+                # Windmill version (this pauses the flow run until an
+                # operator resumes it from the run detail page).
+                suspend:
+                  required_events: 1
+                  timeout: 604800
+
+              - id: taskmine_promote
+                value:
+                  type: rawscript
+                  language: bash
+                  content: |
+                    set -euo pipefail
+                    [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2; exit 1; }
+
+                    find /tmp/proposals -type f -print0 \
+                      | while IFS= read -r -d '' f; do
+                          name=$(basename "$f")
+                          memoryctl proposal-apply --work-dir /data/work/canonical --file "$f"
+                          memoryctl commit --work-dir /data/work/canonical \
+                            --lock /data/state/canonical.lock \
+                            --message "taskmine: $name" \
+                            --pathspec global
+                          rm -f "$f"
+                        done
+
+                    memoryctl push --work-dir /data/work/canonical --lock /data/state/canonical.lock
+                  input_transforms: {}
+        default: []

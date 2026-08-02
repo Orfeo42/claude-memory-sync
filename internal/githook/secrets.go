@@ -16,6 +16,10 @@ const maxScannedFileSize = 1 << 20
 // secretPattern: keep in sync with build/synthesizer secret_pattern (build/synthesizer/lib.sh).
 var secretPattern = regexp.MustCompile(`(?i)(api[_-]?key|secret|password|token)\s*[:=]\s*[A-Za-z0-9_-]{16,}|\bghp_[A-Za-z0-9]{20,}|\bsk-[A-Za-z0-9_-]{20,}|\bAKIA[A-Z0-9]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----`)
 
+func ContainsSecret(data []byte) bool {
+	return secretPattern.Match(data)
+}
+
 func scanSecrets(ctx context.Context, gitDir, newSHA string, entries []diffEntry) error {
 	for _, entry := range entries {
 		if entry.deleted {
