@@ -5,8 +5,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
+	"syscall"
+
+	"claude-memory-sync/internal/domain"
 )
 
 func Run(ctx context.Context, dir string, args ...string) error {
@@ -40,4 +44,21 @@ func HasStagedChanges(ctx context.Context, dir string) (bool, error) {
 	}
 
 	return false, fmt.Errorf("git diff --cached: %w", err)
+}
+
+func WithFileLock(path string, fn func() error) error {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return domain.Error(err, "open lock file failed")
+	}
+	defer func() {
+		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		_ = file.Close()
+	}()
+
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
+		return domain.Error(err, "acquire file lock failed")
+	}
+
+	return fn()
 }

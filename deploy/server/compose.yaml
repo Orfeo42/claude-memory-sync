@@ -40,45 +40,49 @@ services:
       - ${MEMORY_BACKUP_SSH_KEY:-/dev/null}:/root/.ssh/id_ed25519:ro
     entrypoint: ["git", "-C", "/data", "push", "origin", "storage"]
 
-  memory-git:
-    image: codeberg.org/forgejo/forgejo:15-rootless
+  windmill-db:
+    image: postgres:16-alpine
     environment:
-      FORGEJO__security__INSTALL_LOCK: "true"
-      FORGEJO__database__DB_TYPE: sqlite3
-      FORGEJO__server__ROOT_URL: http://raspberry:8081/
-      FORGEJO__server__HTTP_PORT: "3000"
-      FORGEJO__server__DISABLE_SSH: "true"
-      FORGEJO__service__DISABLE_REGISTRATION: "true"
-      FORGEJO__service__REQUIRE_SIGNIN_VIEW: "false"
-      FORGEJO__repository__ENABLE_PUSH_CREATE_USER: "true"
-      FORGEJO__repository__DEFAULT_PUSH_CREATE_PRIVATE: "false"
-      FORGEJO__repository__DEFAULT_PRIVATE: public
+      POSTGRES_USER: windmill
+      POSTGRES_DB: windmill
+      POSTGRES_PASSWORD: ${WINDMILL_DB_PASSWORD:?}
     volumes:
-      - forgejo-data:/var/lib/gitea
-      - forgejo-config:/etc/gitea
-    ports:
-      - "8081:3000"
+      - windmill-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U windmill"]
     restart: unless-stopped
 
-  memory-git-mirror:
-    image: alpine/git
-    depends_on:
-      - memory-git
-    entrypoint:
-      [
-        "sh",
-        "-c",
-        "git config --global safe.directory '*'; while true; do for r in /data/repos/canonical.git /data/repos/clients/*.git; do [ -d \"$$r\" ] || continue; n=$$(basename \"$$r\" .git); case \"$$r\" in */clients/*) n=\"client-$$n\";; esac; git --git-dir=\"$$r\" push --mirror \"http://$$FORGEJO_MIRROR_USER:$$FORGEJO_MIRROR_PASSWORD@memory-git:3000/$$FORGEJO_MIRROR_USER/$$n.git\" >/dev/null 2>&1 || echo \"mirror push failed: $$n\"; done; sleep $${MIRROR_INTERVAL:-60}; done",
-      ]
+  windmill-server:
+    image: ghcr.io/windmill-labs/windmill:main
     environment:
-      FORGEJO_MIRROR_USER: ${FORGEJO_MIRROR_USER:?}
-      FORGEJO_MIRROR_PASSWORD: ${FORGEJO_MIRROR_PASSWORD:?}
-      MIRROR_INTERVAL: ${MIRROR_INTERVAL:-60}
+      DATABASE_URL: postgres://windmill:${WINDMILL_DB_PASSWORD:?}@windmill-db/windmill?sslmode=disable
+      MODE: server
+    ports:
+      - "8081:8000"
+    depends_on:
+      windmill-db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  windmill-worker:
+    image: claude-memory-sync-windmill-worker:latest
+    build:
+      context: ../..
+      dockerfile: build/windmill-worker.Dockerfile
+    environment:
+      DATABASE_URL: postgres://windmill:${WINDMILL_DB_PASSWORD:?}@windmill-db/windmill?sslmode=disable
+      MODE: worker
+      WORKER_GROUP: default
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:?}
     volumes:
-      - memory-data:/data:ro
+      - memory-data:/data
+    depends_on:
+      windmill-db:
+        condition: service_healthy
+      windmill-server:
+        condition: service_started
     restart: unless-stopped
 
 volumes:
   memory-data:
-  forgejo-data:
-  forgejo-config:
+  windmill-db-data:

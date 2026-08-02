@@ -1,0 +1,433 @@
+# Windmill OpenFlow template — import via the Windmill UI/CLI and expect to
+# adjust module/suspend/branch syntax to match the running Windmill version.
+# See deploy/windmill/setup.md ("Flow YAML caveat") before trusting this
+# file verbatim. Ports build/synthesizer/synth.sh and adds distillation +
+# hot-cache stages that synth.sh never had.
+#
+# Schedule: daily. Concurrency: 1 (serialize with itself).
+summary: memory-daily-synth
+description: >
+  Per-project condense/dedup (+ optional staleness deletion), cross-project
+  distillation with human-approved proposals, and hot-cache digest
+  regeneration. Prompt text lives in Windmill variables — see
+  deploy/windmill/setup.md for the full variable list.
+
+schema:
+  $schema: "https://json-schema.org/draft/2020-12/schema"
+  type: object
+  properties:
+    synth_model:
+      type: string
+      default: sonnet
+      description: claude -p --model value. Windmill variable u/admin/synth_model.
+    staleness_enabled:
+      type: boolean
+      default: false
+      description: >
+        When true, append the staleness-deletion addendum to the condense
+        prompt. Windmill variable u/admin/staleness_enabled.
+    hotcache_max_bytes:
+      type: integer
+      default: 4000
+      description: Windmill variable u/admin/hotcache_max_bytes.
+    condense_prompt:
+      type: string
+      default: "$var:u/admin/synth_condense"
+      description: deploy/windmill/prompts/synth-condense.md
+    staleness_prompt:
+      type: string
+      default: "$var:u/admin/synth_staleness"
+      description: deploy/windmill/prompts/synth-staleness.md
+    distill_scan_prompt:
+      type: string
+      default: "$var:u/admin/distill_scan"
+      description: deploy/windmill/prompts/distill-scan.md
+    distill_write_prompt:
+      type: string
+      default: "$var:u/admin/distill_write"
+      description: deploy/windmill/prompts/distill-write.md
+    hotcache_digest_prompt:
+      type: string
+      default: "$var:u/admin/hotcache_digest"
+      description: deploy/windmill/prompts/hotcache-digest.md
+  required: []
+
+value:
+  # TODO verify: exact field names for the installed Windmill version.
+  concurrent_limit: 1
+  concurrency_time_window_s: 3600
+
+  modules:
+    - id: ensure_work
+      value:
+        type: rawscript
+        language: bash
+        content: |
+          set -euo pipefail
+          [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2; exit 1; }
+
+          memoryctl ensure-work --repos-dir /data/repos --work-dir /data/work/canonical
+          mkdir -p /tmp/proposals
+        input_transforms: {}
+
+    - id: corpus_list
+      summary: "TODO verify: assumed shape {\"projects\":[{\"key\":str,\"entries\":[str,...]}]}"
+      value:
+        type: rawscript
+        language: bash
+        content: |
+          set -euo pipefail
+          [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2; exit 1; }
+
+          memoryctl corpus list --work-dir /data/work/canonical
+        input_transforms: {}
+
+    - id: condense_keys
+      summary: project keys with >= 2 entries (mirrors synth.sh's entry_count guard)
+      value:
+        type: rawscript
+        language: bash
+        content: |
+          set -euo pipefail
+          printf '%s' "$WM_CORPUS" | python3 -c '
+          import json, sys
+          data = json.load(sys.stdin)
+          keys = [p["key"] for p in data.get("projects", []) if len(p.get("entries", [])) >= 2]
+          print(json.dumps(sorted(keys)))
+          '
+        input_transforms:
+          WM_CORPUS:
+            type: javascript
+            expr: results.corpus_list
+
+    - id: all_keys
+      summary: every project key, used for the hot-cache pass below
+      value:
+        type: rawscript
+        language: bash
+        content: |
+          set -euo pipefail
+          printf '%s' "$WM_CORPUS" | python3 -c '
+          import json, sys
+          data = json.load(sys.stdin)
+          keys = [p["key"] for p in data.get("projects", [])]
+          print(json.dumps(sorted(keys)))
+          '
+        input_transforms:
+          WM_CORPUS:
+            type: javascript
+            expr: results.corpus_list
+
+    - id: condense
+      summary: condense (+ optional staleness) each eligible project
+      value:
+        type: forloopflow
+        iterator:
+          type: javascript
+          expr: results.condense_keys
+        # one project's LLM/parse failure should not block the rest of the
+        # nightly pass (unlike intake's stricter all-or-nothing loop).
+        skip_failures: true
+        modules:
+          - id: condense_one
+            value:
+              type: rawscript
+              language: bash
+              content: |
+                set -euo pipefail
+                [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2; exit 1; }
+
+                key="$WM_PROJECT_KEY"
+                memory_dir="/data/work/canonical/projects/$key/memory"
+
+                prompt_file=$(mktemp)
+                ctx_file=$(mktemp)
+                trap 'rm -f "$prompt_file" "$ctx_file"' EXIT
+
+                printf '%s\n\n' "$WM_CONDENSE_PROMPT" > "$prompt_file"
+                if [ "$WM_STALENESS_ENABLED" = "true" ]; then
+                  printf '%s\n\n' "$WM_STALENESS_PROMPT" >> "$prompt_file"
+                fi
+
+                printf '{"clients":[]}' \
+                  | memoryctl context --repos-dir /data/repos --work-dir /data/work/canonical --project "$key" \
+                  > "$ctx_file"
+                cat "$ctx_file" >> "$prompt_file"
+
+                claude -p --model "$WM_MODEL" < "$prompt_file" \
+                  | memoryctl ops-apply --allow-delete --memory-dir "$memory_dir"
+
+                memoryctl commit --work-dir /data/work/canonical \
+                  --lock /data/state/canonical.lock \
+                  --message "synthesize: $key" \
+                  --pathspec "projects/$key/memory"
+              input_transforms:
+                WM_PROJECT_KEY:
+                  type: javascript
+                  expr: flow_input.iter.value
+                WM_CONDENSE_PROMPT:
+                  type: javascript
+                  expr: flow_input.condense_prompt
+                WM_STALENESS_PROMPT:
+                  type: javascript
+                  expr: flow_input.staleness_prompt
+                WM_STALENESS_ENABLED:
+                  type: javascript
+                  expr: "flow_input.staleness_enabled ? 'true' : 'false'"
+                WM_MODEL:
+                  type: javascript
+                  expr: flow_input.synth_model
+
+    - id: distill_scan
+      summary: stage 1 — find cross-project clusters
+      value:
+        type: rawscript
+        language: bash
+        content: |
+          set -euo pipefail
+          [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2; exit 1; }
+
+          prompt_file=$(mktemp)
+          trap 'rm -f "$prompt_file"' EXIT
+          printf '%s\n\n' "$WM_DISTILL_SCAN_PROMPT" > "$prompt_file"
+          memoryctl corpus digest --work-dir /data/work/canonical >> "$prompt_file"
+
+          claude -p --model "$WM_MODEL" < "$prompt_file"
+        input_transforms:
+          WM_DISTILL_SCAN_PROMPT:
+            type: javascript
+            expr: flow_input.distill_scan_prompt
+          WM_MODEL:
+            type: javascript
+            expr: flow_input.synth_model
+
+    - id: distill_clusters
+      summary: NOTHING or JSON Lines -> JSON array of cluster objects
+      value:
+        type: rawscript
+        language: bash
+        content: |
+          set -euo pipefail
+          printf '%s' "$WM_SCAN_OUT" | python3 -c '
+          import json, sys
+          raw = sys.stdin.read().strip()
+          clusters = []
+          if raw and raw != "NOTHING":
+              for line in raw.splitlines():
+                  line = line.strip()
+                  if not line:
+                      continue
+                  try:
+                      clusters.append(json.loads(line))
+                  except json.JSONDecodeError:
+                      print("distill_clusters: skipping unparseable line: " + line, file=sys.stderr)
+          print(json.dumps(clusters))
+          '
+        input_transforms:
+          WM_SCAN_OUT:
+            type: javascript
+            expr: results.distill_scan
+
+    - id: distill_write
+      summary: stage 2 — write a unified entry / deletes / proposals per cluster
+      value:
+        type: forloopflow
+        iterator:
+          type: javascript
+          expr: results.distill_clusters
+        skip_failures: true
+        modules:
+          - id: distill_one
+            value:
+              type: rawscript
+              language: bash
+              content: |
+                set -euo pipefail
+                [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2; exit 1; }
+
+                cluster_json="$WM_CLUSTER_JSON"
+                title=$(printf '%s' "$cluster_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["title"])')
+
+                # v1 simplification: the LLM is asked to pick "the single most
+                # relevant project" for the ===FILE: op, but memoryctl
+                # ops-apply targets one --memory-dir per invocation, so the
+                # shell resolves the target as the FIRST project listed in
+                # the cluster's entries[] rather than parsing it back out of
+                # the model's free-form output. See setup.md.
+                target_project=$(printf '%s' "$cluster_json" | python3 -c '
+                import json, sys
+                c = json.load(sys.stdin)
+                print(c["entries"][0].split("/", 1)[0])
+                ')
+                memory_dir="/data/work/canonical/projects/$target_project/memory"
+
+                prompt_file=$(mktemp)
+                trap 'rm -f "$prompt_file"' EXIT
+                printf '%s\n\n' "$WM_DISTILL_WRITE_PROMPT" > "$prompt_file"
+                printf 'CLUSTER:\n%s\n\nENTRIES:\n' "$cluster_json" >> "$prompt_file"
+
+                printf '%s' "$cluster_json" | python3 -c '
+                import json, sys
+                c = json.load(sys.stdin)
+                for e in c["entries"]:
+                    print(e)
+                ' | while IFS='/' read -r proj file; do
+                    [ -z "$proj" ] && continue
+                    printf -- '--- %s/%s ---\n' "$proj" "$file"
+                    memoryctl corpus read --work-dir /data/work/canonical --project "$proj" --file "$file"
+                    printf '\n'
+                  done >> "$prompt_file"
+
+                claude -p --model "$WM_MODEL" < "$prompt_file" \
+                  | memoryctl ops-apply --allow-delete --memory-dir "$memory_dir" --proposals-dir /tmp/proposals
+
+                memoryctl commit --work-dir /data/work/canonical \
+                  --lock /data/state/canonical.lock \
+                  --message "distill: $title" \
+                  --pathspec "projects/$target_project/memory"
+              input_transforms:
+                WM_CLUSTER_JSON:
+                  type: javascript
+                  expr: JSON.stringify(flow_input.iter.value)
+                WM_DISTILL_WRITE_PROMPT:
+                  type: javascript
+                  expr: flow_input.distill_write_prompt
+                WM_MODEL:
+                  type: javascript
+                  expr: flow_input.synth_model
+
+    - id: check_proposals
+      summary: any distill proposals staged in /tmp/proposals?
+      value:
+        type: rawscript
+        language: bash
+        content: |
+          set -euo pipefail
+          if find /tmp/proposals -type f 2>/dev/null | grep -q .; then
+            echo true
+          else
+            echo false
+          fi
+        input_transforms: {}
+
+    # TODO verify: branchone syntax (branches[].expr + branches[].modules,
+    # default[]) for the installed Windmill version.
+    - id: promote_if_approved
+      value:
+        type: branchone
+        branches:
+          - summary: proposals staged — ask for approval, then promote
+            expr: "results.check_proposals === 'true'"
+            modules:
+              - id: distill_approval
+                summary: >
+                  Approval gate. Payload lists every staged proposal path +
+                  content for operator review in the Windmill run UI.
+                  Resuming approves ALL currently staged proposals (v1 has
+                  no per-file selective approval — cancel the run instead
+                  of resuming to discard them).
+                value:
+                  type: rawscript
+                  language: bash
+                  content: |
+                    set -euo pipefail
+                    find /tmp/proposals -type f -print0 \
+                      | while IFS= read -r -d '' f; do
+                          printf -- '--- %s ---\n' "$f"
+                          cat "$f"
+                          printf '\n'
+                        done
+                  input_transforms: {}
+                # TODO verify: suspend config field names for the installed
+                # Windmill version (this pauses the flow run until an
+                # operator resumes it from the run detail page).
+                suspend:
+                  required_events: 1
+                  timeout: 604800
+
+              - id: distill_promote
+                value:
+                  type: rawscript
+                  language: bash
+                  content: |
+                    set -euo pipefail
+                    [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2; exit 1; }
+
+                    find /tmp/proposals -type f -print0 \
+                      | while IFS= read -r -d '' f; do
+                          name=$(basename "$f")
+                          memoryctl proposal-apply --work-dir /data/work/canonical --file "$f"
+                          memoryctl commit --work-dir /data/work/canonical \
+                            --lock /data/state/canonical.lock \
+                            --message "distill: promote $name" \
+                            --pathspec global
+                          rm -f "$f"
+                        done
+                  input_transforms: {}
+        default: []
+
+    - id: hotcache
+      summary: regenerate the hot-cache digest for every project
+      value:
+        type: forloopflow
+        iterator:
+          type: javascript
+          expr: results.all_keys
+        skip_failures: true
+        modules:
+          - id: hotcache_one
+            value:
+              type: rawscript
+              language: bash
+              content: |
+                set -euo pipefail
+                [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2; exit 1; }
+
+                key="$WM_PROJECT_KEY"
+                memory_dir="/data/work/canonical/projects/$key/memory"
+
+                prompt_file=$(mktemp)
+                ctx_file=$(mktemp)
+                trap 'rm -f "$prompt_file" "$ctx_file"' EXIT
+
+                printf '{"clients":[]}' \
+                  | memoryctl context --repos-dir /data/repos --work-dir /data/work/canonical --project "$key" \
+                  > "$ctx_file"
+
+                printf '%s\n\n' "$WM_HOTCACHE_PROMPT" > "$prompt_file"
+                cat "$ctx_file" >> "$prompt_file"
+
+                claude -p --model "$WM_MODEL" < "$prompt_file" \
+                  | memoryctl hotcache-write --memory-dir "$memory_dir" --max-bytes "$WM_MAX_BYTES"
+
+                # output location of hotcache-write is not pinned down by
+                # the CLI contract (memory_dir vs project root) — commit the
+                # whole project directory to be safe.
+                memoryctl commit --work-dir /data/work/canonical \
+                  --lock /data/state/canonical.lock \
+                  --message "hotcache: $key" \
+                  --pathspec "projects/$key"
+              input_transforms:
+                WM_PROJECT_KEY:
+                  type: javascript
+                  expr: flow_input.iter.value
+                WM_HOTCACHE_PROMPT:
+                  type: javascript
+                  expr: flow_input.hotcache_digest_prompt
+                WM_MODEL:
+                  type: javascript
+                  expr: flow_input.synth_model
+                WM_MAX_BYTES:
+                  type: javascript
+                  expr: flow_input.hotcache_max_bytes
+
+    - id: push
+      value:
+        type: rawscript
+        language: bash
+        content: |
+          set -euo pipefail
+          [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2; exit 1; }
+
+          memoryctl push --work-dir /data/work/canonical --lock /data/state/canonical.lock
+        input_transforms: {}
