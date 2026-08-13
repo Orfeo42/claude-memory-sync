@@ -72,6 +72,7 @@ services:
       MODE: worker
       WORKER_GROUP: default
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:?}
+      WHITELIST_ENVS: CLAUDE_CODE_OAUTH_TOKEN
     volumes:
       - memory-data:/data
     depends_on:

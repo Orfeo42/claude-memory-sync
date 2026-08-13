@@ -29,7 +29,7 @@ schema:
 value:
   # TODO verify: exact field names for the installed Windmill version.
   concurrent_limit: 1
-  concurrency_time_window_s: 3600
+  concurrency_time_window_s: 0
 
   modules:
     - id: ensure_work
@@ -50,6 +50,8 @@ value:
         type: rawscript
         language: bash
         content: |
+          WM_TASKMINE_PROMPT="$1"
+          WM_MODEL="$2"
           set -euo pipefail
           [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2; exit 1; }
 
