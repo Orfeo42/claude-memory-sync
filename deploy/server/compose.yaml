@@ -54,6 +54,7 @@ services:
 
   windmill-server:
     image: ghcr.io/windmill-labs/windmill:main
+    pull_policy: "always"
     environment:
       DATABASE_URL: postgres://windmill:${WINDMILL_DB_PASSWORD:?}@windmill-db/windmill?sslmode=disable
       MODE: server

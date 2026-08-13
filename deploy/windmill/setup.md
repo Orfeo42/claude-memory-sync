@@ -38,7 +38,7 @@ syntactically valid YAML, not valid OpenFlow.
 ## 1. First boot
 
 1. Bring up the DB + server: `docker compose up -d windmill-db
-   windmill-server` (from `deploy/server/`). Requires
+windmill-server` (from `deploy/server/`). Requires
    `WINDMILL_DB_PASSWORD` set in `.env`.
 2. Open `http://<host>:8081`. First visit prompts you to create the
    **superadmin** account (email/password, local to this instance — not
@@ -92,15 +92,15 @@ file's full content as the variable's value. These are the defaults the
 flows reference; editing a variable's value in the UI changes the next
 scheduled run immediately, no image rebuild or redeploy needed.
 
-| Variable path                  | Source file                          | Used by            |
-| ------------------------------- | ------------------------------------- | ------------------ |
-| `f/memory/intake_judge`          | `prompts/intake-judge.md`             | `intake.flow`       |
-| `f/memory/synth_condense`        | `prompts/synth-condense.md`           | `daily-synth.flow`  |
-| `f/memory/synth_staleness`       | `prompts/synth-staleness.md`          | `daily-synth.flow`  |
-| `f/memory/hotcache_digest`       | `prompts/hotcache-digest.md`          | `daily-synth.flow`  |
-| `f/memory/distill_scan`          | `prompts/distill-scan.md`             | `daily-synth.flow`  |
-| `f/memory/distill_write`         | `prompts/distill-write.md`            | `daily-synth.flow`  |
-| `f/memory/taskmine_draft`        | `prompts/taskmine-draft.md`           | `taskmine.flow`     |
+| Variable path              | Source file                  | Used by            |
+| -------------------------- | ---------------------------- | ------------------ |
+| `f/memory/intake_judge`    | `prompts/intake-judge.md`    | `intake.flow`      |
+| `f/memory/synth_condense`  | `prompts/synth-condense.md`  | `daily-synth.flow` |
+| `f/memory/synth_staleness` | `prompts/synth-staleness.md` | `daily-synth.flow` |
+| `f/memory/hotcache_digest` | `prompts/hotcache-digest.md` | `daily-synth.flow` |
+| `f/memory/distill_scan`    | `prompts/distill-scan.md`    | `daily-synth.flow` |
+| `f/memory/distill_write`   | `prompts/distill-write.md`   | `daily-synth.flow` |
+| `f/memory/taskmine_draft`  | `prompts/taskmine-draft.md`  | `taskmine.flow`    |
 
 ## 5. Parameter variables
 
@@ -109,11 +109,11 @@ rely on the flow input schema defaults documented in each
 `flows/*.flow.yaml` — either works, an explicit variable makes the
 current value visible without opening a flow run):
 
-| Variable path                | Type    | Default   | Meaning                                              |
-| ----------------------------- | ------- | --------- | ----------------------------------------------------- |
-| `f/memory/synth_model`         | string  | `sonnet`  | `claude -p --model` value, all flows.                 |
-| `f/memory/staleness_enabled`   | boolean | `false`   | Appends `synth_staleness` to the condense prompt.      |
-| `f/memory/hotcache_max_bytes`  | integer | `4000`    | Cap passed to `memoryctl hotcache-write --max-bytes`.  |
+| Variable path                 | Type    | Default  | Meaning                                               |
+| ----------------------------- | ------- | -------- | ----------------------------------------------------- |
+| `f/memory/synth_model`        | string  | `sonnet` | `claude -p --model` value, all flows.                 |
+| `f/memory/staleness_enabled`  | boolean | `false`  | Appends `synth_staleness` to the condense prompt.     |
+| `f/memory/hotcache_max_bytes` | integer | `4000`   | Cap passed to `memoryctl hotcache-write --max-bytes`. |
 
 ## 6. Import the flows
 
@@ -129,11 +129,11 @@ suggestion: `f/memory/intake`, `f/memory/daily_synth`,
 Each flow gets its own schedule, attached from the flow's **Triggers** →
 **Schedule** tab:
 
-| Flow               | Cron              | Interval  |
-| ------------------- | ----------------- | --------- |
-| `intake.flow`        | `*/45 * * * *`      | 45 minutes |
-| `daily-synth.flow`   | `0 3 * * *`          | daily (03:00) |
-| `taskmine.flow`      | `0 4 * * 0`          | weekly (Sunday 04:00) |
+| Flow               | Cron           | Interval              |
+| ------------------ | -------------- | --------------------- |
+| `intake.flow`      | `*/45 * * * *` | 45 minutes            |
+| `daily-synth.flow` | `0 3 * * *`    | daily (03:00)         |
+| `taskmine.flow`    | `0 4 * * 0`    | weekly (Sunday 04:00) |
 
 Pick times that don't overlap on a small Raspberry Pi worker — the
 suggested offsets above stagger daily-synth and taskmine an hour apart
@@ -166,19 +166,17 @@ pre-approval-gated).
 When proposals are staged, the flow run **suspends** at the approval
 step (visible in the Windmill UI as a paused run, distinct from
 running/success/failure). Open the run detail page: the step's output
-lists every staged proposal's path and full content. Two ways to
-resolve it:
+lists every staged proposal grouped by name (skill directory name for
+`global/skills/**`, target basename otherwise) with full content.
+Resolving it:
 
-- **Resume** (via the UI button, or the resume API/webhook Windmill
-  exposes for the run) — approves and promotes **all** currently staged
-  proposals in that run. v1 has no per-file selective approval; if only
-  some proposals are wanted, edit them out of `/tmp/proposals` on the
-  worker container before resuming, or just don't resume and let the
-  run stay suspended/cancel it — nothing gets promoted, and the files
-  are cleaned up on the next run's `mkdir -p /tmp/proposals` step reuse
-  (they are not otherwise deleted automatically).
-- **Cancel** the run — discards the batch; nothing under
-  `/tmp/proposals` gets promoted into canonical.
+- **Resume** — the resume form has one field, `approved`: `all`
+  (default) promotes every group, `none` promotes nothing, or a
+  comma-separated list of group names promotes exactly those. Files not
+  approved are deleted from staging; nothing needs manual cleanup on
+  the worker container.
+- **Cancel** the run — discards the batch; nothing gets promoted, and
+  the next run wipes `/tmp/proposals` at its first step anyway.
 
 Promoted proposals are applied via `memoryctl proposal-apply`, one
 commit each (`distill: promote <name>` / `taskmine: <name>`), then

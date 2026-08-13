@@ -67,6 +67,7 @@ value:
           [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2; exit 1; }
 
           memoryctl ensure-work --repos-dir /data/repos --work-dir /data/work/canonical
+          rm -rf /tmp/proposals
           mkdir -p /tmp/proposals
         input_transforms: {}
 
@@ -199,7 +200,16 @@ value:
           prompt_file=$(mktemp)
           trap 'rm -f "$prompt_file"' EXIT
           printf '%s\n\n' "$WM_DISTILL_SCAN_PROMPT" > "$prompt_file"
-          memoryctl corpus digest --work-dir /data/work/canonical >> "$prompt_file"
+
+          memoryctl corpus list --work-dir /data/work/canonical \
+            | python3 -c 'import json,sys; [print(p["key"]) for p in json.load(sys.stdin)]' \
+            | while IFS= read -r key; do
+                index="/data/work/canonical/projects/$key/memory/MEMORY.md"
+                [ -f "$index" ] || continue
+                printf '=== project: %s ===\n' "$key"
+                cat "$index"
+                printf '\n'
+              done >> "$prompt_file"
 
           claude -p --model "$WM_MODEL" < "$prompt_file"
         input_transforms:
@@ -334,49 +344,90 @@ value:
             modules:
               - id: distill_approval
                 summary: >
-                  Approval gate. Payload lists every staged proposal path +
-                  content for operator review in the Windmill run UI.
-                  Resuming approves ALL currently staged proposals (v1 has
-                  no per-file selective approval — cancel the run instead
-                  of resuming to discard them).
+                  Approval gate. Output groups staged proposals by name. On
+                  Resume, fill the form field "approved" with "all",
+                  "none", or a comma-separated list of the group names to
+                  promote — only those are promoted, the rest are deleted.
                 value:
                   type: rawscript
                   language: bash
                   content: |
                     set -euo pipefail
-                    find /tmp/proposals -type f -print0 \
-                      | while IFS= read -r -d '' f; do
-                          printf -- '--- %s ---\n' "$f"
-                          cat "$f"
-                          printf '\n'
-                        done
+                    md=$(mktemp)
+                    printf '# Staged proposals\n\n' > "$md"
+                    printf 'On **Resume**, set `approved` to `all`, `none`, or comma-separated group names.\n\n' >> "$md"
+                    for f in /tmp/proposals/*; do
+                      case "$f" in *.path) continue ;; esac
+                      target=$(cat "$f.path")
+                      case "$target" in
+                        global/skills/*) group=$(printf '%s' "$target" | cut -d/ -f3) ;;
+                        *) group=$(basename "$target") ;;
+                      esac
+                      printf '## %s\n\ntarget: `%s`\n\n````markdown\n' "$group" "$target" >> "$md"
+                      cat "$f" >> "$md"
+                      printf '\n````\n\n' >> "$md"
+                    done
+                    python3 -c 'import json,sys; print(json.dumps({"markdown": open(sys.argv[1]).read()}))' "$md" > ./result.json
+                    rm -f "$md"
                   input_transforms: {}
-                # TODO verify: suspend config field names for the installed
-                # Windmill version (this pauses the flow run until an
-                # operator resumes it from the run detail page).
+                # TODO verify: suspend + resume_form field names for the
+                # installed Windmill version.
                 suspend:
                   required_events: 1
                   timeout: 604800
+                  resume_form:
+                    schema:
+                      type: object
+                      properties:
+                        approved:
+                          type: string
+                          default: all
+                          description: >
+                            all | none | comma-separated group names to promote
 
               - id: distill_promote
                 value:
                   type: rawscript
                   language: bash
                   content: |
+                    WM_APPROVED="$1"
                     set -euo pipefail
                     [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2; exit 1; }
 
-                    find /tmp/proposals -type f -print0 \
-                      | while IFS= read -r -d '' f; do
-                          name=$(basename "$f")
-                          memoryctl proposal-apply --work-dir /data/work/canonical --file "$f"
-                          memoryctl commit --work-dir /data/work/canonical \
-                            --lock /data/state/canonical.lock \
-                            --message "distill: promote $name" \
-                            --pathspec global
-                          rm -f "$f"
-                        done
-                  input_transforms: {}
+                    approved=$(printf '%s' "$WM_APPROVED" | tr -d ' ')
+                    rm -f /tmp/promote-promoted /tmp/promote-discarded
+                    for f in /tmp/proposals/*; do
+                      case "$f" in *.path) continue ;; esac
+                      target=$(cat "$f.path")
+                      case "$target" in
+                        global/skills/*) group=$(printf '%s' "$target" | cut -d/ -f3) ;;
+                        *) group=$(basename "$target") ;;
+                      esac
+                      if [ "$approved" = "all" ] || printf ',%s,' "$approved" | grep -q ",$group,"; then
+                        memoryctl proposal-apply --work-dir /data/work/canonical --file "$f"
+                        memoryctl commit --work-dir /data/work/canonical \
+                          --lock /data/state/canonical.lock \
+                          --message "distill: promote $group" \
+                          --pathspec global
+                        printf '%s\n' "$target" >> /tmp/promote-promoted
+                      else
+                        printf '%s\n' "$target" >> /tmp/promote-discarded
+                      fi
+                      rm -f "$f" "$f.path"
+                    done
+
+                    python3 - <<'EOF' > ./result.json
+                    import json, pathlib
+                    def lines(p):
+                        f = pathlib.Path(p)
+                        return f.read_text().splitlines() if f.exists() else []
+                    print(json.dumps({"promoted": lines("/tmp/promote-promoted"), "discarded": lines("/tmp/promote-discarded")}))
+                    EOF
+                    rm -f /tmp/promote-promoted /tmp/promote-discarded
+                  input_transforms:
+                    WM_APPROVED:
+                      type: javascript
+                      expr: resume?.approved ?? 'all'
         default: []
 
     - id: hotcache
