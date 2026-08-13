@@ -10,7 +10,7 @@ description: >
   manual procedures worth turning into a reusable zsh function, script, or
   Claude Code skill. Always proposal-only (global/skills/**), never
   auto-applied. Prompt text lives in the Windmill variable
-  u/admin/taskmine_draft (default body: deploy/windmill/prompts/taskmine-draft.md).
+  f/memory/taskmine_draft (default body: deploy/windmill/prompts/taskmine-draft.md).
 
 schema:
   $schema: "https://json-schema.org/draft/2020-12/schema"
@@ -19,10 +19,10 @@ schema:
     synth_model:
       type: string
       default: sonnet
-      description: claude -p --model value. Windmill variable u/admin/synth_model.
+      description: claude -p --model value. Windmill variable f/memory/synth_model.
     taskmine_draft_prompt:
       type: string
-      default: "$var:u/admin/taskmine_draft"
+      default: "$var:f/memory/taskmine_draft"
       description: deploy/windmill/prompts/taskmine-draft.md
   required: []
 

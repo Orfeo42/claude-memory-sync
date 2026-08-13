@@ -8,7 +8,7 @@ summary: memory-intake
 description: >
   Per-client novelty judgment for projects/*/memory candidates, plus
   mechanical last-writer-wins merge for global/ config trees. Prompt text
-  for the judge step lives in the Windmill variable u/admin/intake_judge
+  for the judge step lives in the Windmill variable f/memory/intake_judge
   (default body: deploy/windmill/prompts/intake-judge.md).
 
 schema:
@@ -19,10 +19,10 @@ schema:
       type: string
       default: sonnet
       description: >
-        claude -p --model value. Windmill variable u/admin/synth_model.
+        claude -p --model value. Windmill variable f/memory/synth_model.
     intake_judge_prompt:
       type: string
-      default: "$var:u/admin/intake_judge"
+      default: "$var:f/memory/intake_judge"
       description: >
         TODO verify: "$var:path" is Windmill's static-value variable
         reference syntax (resolved at run time). Confirm on import; if
