@@ -19,7 +19,7 @@ Concretely uncertain, and marked `TODO verify` inline in the YAML:
 
 - The exact field names for per-flow concurrency limits
   (`concurrent_limit` / `concurrency_time_window_s` at `value` level).
-- The `$var:u/admin/<name>` static-value syntax for resolving a Windmill
+- The `$var:f/memory/<name>` static-value syntax for resolving a Windmill
   variable into a flow input default — confirm this resolves at run time
   on the installed version; if not, replace with an explicit step that
   calls the variable-get API/CLI.
@@ -65,7 +65,7 @@ set up.
 
 In the `memory` workspace, go to **Variables** → **New variable**:
 
-- Name: `u/admin/claude_code_oauth_token`
+- Name: `f/memory/claude_code_oauth_token`
 - Value: the output of `claude setup-token` (subscription OAuth, no API
   credits — see `deploy/server/README.md` for the existing synthesizer's
   version of this same one-time setup).
@@ -94,13 +94,13 @@ scheduled run immediately, no image rebuild or redeploy needed.
 
 | Variable path                  | Source file                          | Used by            |
 | ------------------------------- | ------------------------------------- | ------------------ |
-| `u/admin/intake_judge`          | `prompts/intake-judge.md`             | `intake.flow`       |
-| `u/admin/synth_condense`        | `prompts/synth-condense.md`           | `daily-synth.flow`  |
-| `u/admin/synth_staleness`       | `prompts/synth-staleness.md`          | `daily-synth.flow`  |
-| `u/admin/hotcache_digest`       | `prompts/hotcache-digest.md`          | `daily-synth.flow`  |
-| `u/admin/distill_scan`          | `prompts/distill-scan.md`             | `daily-synth.flow`  |
-| `u/admin/distill_write`         | `prompts/distill-write.md`            | `daily-synth.flow`  |
-| `u/admin/taskmine_draft`        | `prompts/taskmine-draft.md`           | `taskmine.flow`     |
+| `f/memory/intake_judge`          | `prompts/intake-judge.md`             | `intake.flow`       |
+| `f/memory/synth_condense`        | `prompts/synth-condense.md`           | `daily-synth.flow`  |
+| `f/memory/synth_staleness`       | `prompts/synth-staleness.md`          | `daily-synth.flow`  |
+| `f/memory/hotcache_digest`       | `prompts/hotcache-digest.md`          | `daily-synth.flow`  |
+| `f/memory/distill_scan`          | `prompts/distill-scan.md`             | `daily-synth.flow`  |
+| `f/memory/distill_write`         | `prompts/distill-write.md`            | `daily-synth.flow`  |
+| `f/memory/taskmine_draft`        | `prompts/taskmine-draft.md`           | `taskmine.flow`     |
 
 ## 5. Parameter variables
 
@@ -111,9 +111,9 @@ current value visible without opening a flow run):
 
 | Variable path                | Type    | Default   | Meaning                                              |
 | ----------------------------- | ------- | --------- | ----------------------------------------------------- |
-| `u/admin/synth_model`         | string  | `sonnet`  | `claude -p --model` value, all flows.                 |
-| `u/admin/staleness_enabled`   | boolean | `false`   | Appends `synth_staleness` to the condense prompt.      |
-| `u/admin/hotcache_max_bytes`  | integer | `4000`    | Cap passed to `memoryctl hotcache-write --max-bytes`.  |
+| `f/memory/synth_model`         | string  | `sonnet`  | `claude -p --model` value, all flows.                 |
+| `f/memory/staleness_enabled`   | boolean | `false`   | Appends `synth_staleness` to the condense prompt.      |
+| `f/memory/hotcache_max_bytes`  | integer | `4000`    | Cap passed to `memoryctl hotcache-write --max-bytes`.  |
 
 ## 6. Import the flows
 

@@ -19,36 +19,36 @@ schema:
     synth_model:
       type: string
       default: sonnet
-      description: claude -p --model value. Windmill variable u/admin/synth_model.
+      description: claude -p --model value. Windmill variable f/memory/synth_model.
     staleness_enabled:
       type: boolean
       default: false
       description: >
         When true, append the staleness-deletion addendum to the condense
-        prompt. Windmill variable u/admin/staleness_enabled.
+        prompt. Windmill variable f/memory/staleness_enabled.
     hotcache_max_bytes:
       type: integer
       default: 4000
-      description: Windmill variable u/admin/hotcache_max_bytes.
+      description: Windmill variable f/memory/hotcache_max_bytes.
     condense_prompt:
       type: string
-      default: "$var:u/admin/synth_condense"
+      default: "$var:f/memory/synth_condense"
       description: deploy/windmill/prompts/synth-condense.md
     staleness_prompt:
       type: string
-      default: "$var:u/admin/synth_staleness"
+      default: "$var:f/memory/synth_staleness"
       description: deploy/windmill/prompts/synth-staleness.md
     distill_scan_prompt:
       type: string
-      default: "$var:u/admin/distill_scan"
+      default: "$var:f/memory/distill_scan"
       description: deploy/windmill/prompts/distill-scan.md
     distill_write_prompt:
       type: string
-      default: "$var:u/admin/distill_write"
+      default: "$var:f/memory/distill_write"
       description: deploy/windmill/prompts/distill-write.md
     hotcache_digest_prompt:
       type: string
-      default: "$var:u/admin/hotcache_digest"
+      default: "$var:f/memory/hotcache_digest"
       description: deploy/windmill/prompts/hotcache-digest.md
   required: []
 
