@@ -36,7 +36,7 @@ value:
   # exact field names for the installed version. Intent: only one
   # intake.flow run active at a time.
   concurrent_limit: 1
-  concurrency_time_window_s: 3600
+  concurrency_time_window_s: 0
 
   modules:
     - id: scan
@@ -58,6 +58,7 @@ value:
         type: rawscript
         language: bash
         content: |
+          WM_SCAN_JSON="$1"
           set -euo pipefail
           [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2; exit 1; }
 
@@ -79,6 +80,7 @@ value:
         type: rawscript
         language: bash
         content: |
+          WM_SCAN_JSON="$1"
           set -euo pipefail
           [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2; exit 1; }
 
@@ -103,7 +105,7 @@ value:
         type: forloopflow
         iterator:
           type: javascript
-          expr: results.project_keys
+          expr: JSON.parse(results.project_keys)
         # any single project failure stops the whole flow (skip_failures:
         # false) — push and marker advancement below are then never
         # reached, so ALL client markers stay unadvanced and the full
@@ -116,6 +118,10 @@ value:
               type: rawscript
               language: bash
               content: |
+                WM_PROJECT_KEY="$1"
+                WM_SCAN_JSON="$2"
+                WM_INTAKE_JUDGE_PROMPT="$3"
+                WM_MODEL="$4"
                 set -euo pipefail
                 [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2; exit 1; }
 
@@ -174,6 +180,7 @@ value:
         type: rawscript
         language: bash
         content: |
+          WM_SCAN_JSON="$1"
           set -euo pipefail
           [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2; exit 1; }
 
