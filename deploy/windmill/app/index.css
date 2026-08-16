@@ -100,6 +100,60 @@ body {
   color: rgb(var(--color-text-secondary));
 }
 
+.run-group {
+  margin-bottom: 1rem;
+  border: 1px solid rgb(var(--color-border-light));
+  border-radius: 0.375rem;
+  padding: 0.5rem;
+}
+
+.run-group-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.5rem;
+}
+
+.run-group-header small {
+  color: rgb(var(--color-text-secondary));
+}
+
+.run-group-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.decision {
+  display: inline-block;
+  width: 1rem;
+  text-align: center;
+}
+
+.decision-approved {
+  color: var(--success);
+}
+
+.decision-rejected {
+  color: var(--danger);
+}
+
+.decision-none {
+  color: rgb(var(--color-text-hint));
+}
+
+.detail-header h3 {
+  margin: 0;
+}
+
+.detail-header {
+  margin-bottom: 0.5rem;
+}
+
+.detail-header small {
+  color: rgb(var(--color-text-secondary));
+}
+
 .detail {
   flex: 1;
   display: flex;
