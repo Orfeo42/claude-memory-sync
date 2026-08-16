@@ -3,6 +3,7 @@ export type ProposalItem = {
   flow: string;
   started_at: string;
   group: string;
+  kind: string;
   content: string;
 };
 
@@ -24,6 +25,7 @@ export const isProposalItem = (value: unknown): value is ProposalItem =>
   typeof value.flow === "string" &&
   typeof value.started_at === "string" &&
   typeof value.group === "string" &&
+  typeof value.kind === "string" &&
   typeof value.content === "string";
 
 export const itemKey = (item: ProposalItem): string =>
@@ -49,6 +51,24 @@ export const groupByRun = (items: readonly ProposalItem[]): RunGroup[] => {
   }
   return [...groups.values()];
 };
+
+export type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+export const isReplyPayload = (value: unknown): value is { reply: string } =>
+  isRecord(value) && typeof value.reply === "string";
+
+export const isRevisionPayload = (
+  value: unknown,
+): value is { applied: string[]; content: string } =>
+  isRecord(value) &&
+  Array.isArray(value.applied) &&
+  typeof value.content === "string";
+
+export const MODELS = ["sonnet", "opus", "haiku"] as const;
+export type Model = (typeof MODELS)[number];
 
 export const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);

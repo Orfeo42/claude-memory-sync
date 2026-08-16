@@ -179,5 +179,5 @@ func validProposalSourcePath(p string) bool {
 	if pathpkg.Clean(p) != p {
 		return false
 	}
-	return strings.HasPrefix(p, "global/")
+	return strings.HasPrefix(p, "global/") || isProjectMemoryProposal(p)
 }

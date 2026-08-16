@@ -21,6 +21,8 @@ const (
 	hotEndMarker   = "<!-- HOT:END -->"
 )
 
+const memoryIndexFile = "MEMORY.md"
+
 const errUnknownCorpusSubcommand cliError = "unknown corpus subcommand"
 
 const errInvalidCorpusFile cliError = "invalid corpus file name"
@@ -145,7 +147,7 @@ func corpusEntryNames(memoryDir string) ([]string, error) {
 
 	names := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		if entry.IsDir() || entry.Name() == "MEMORY.md" || !strings.HasSuffix(entry.Name(), ".md") {
+		if entry.IsDir() || entry.Name() == memoryIndexFile || !strings.HasSuffix(entry.Name(), ".md") {
 			continue
 		}
 		names = append(names, entry.Name())
