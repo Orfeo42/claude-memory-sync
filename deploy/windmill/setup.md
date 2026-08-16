@@ -92,15 +92,16 @@ file's full content as the variable's value. These are the defaults the
 flows reference; editing a variable's value in the UI changes the next
 scheduled run immediately, no image rebuild or redeploy needed.
 
-| Variable path              | Source file                  | Used by            |
-| -------------------------- | ---------------------------- | ------------------ |
-| `f/memory/intake_judge`    | `prompts/intake-judge.md`    | `intake.flow`      |
-| `f/memory/synth_condense`  | `prompts/synth-condense.md`  | `daily-synth.flow` |
-| `f/memory/synth_staleness` | `prompts/synth-staleness.md` | `daily-synth.flow` |
-| `f/memory/hotcache_digest` | `prompts/hotcache-digest.md` | `daily-synth.flow` |
-| `f/memory/distill_scan`    | `prompts/distill-scan.md`    | `daily-synth.flow` |
-| `f/memory/distill_write`   | `prompts/distill-write.md`   | `daily-synth.flow` |
-| `f/memory/taskmine_draft`  | `prompts/taskmine-draft.md`  | `taskmine.flow`    |
+| Variable path               | Source file                   | Used by            |
+| --------------------------- | ----------------------------- | ------------------ |
+| `f/memory/intake_judge`     | `prompts/intake-judge.md`     | `intake.flow`      |
+| `f/memory/synth_condense`   | `prompts/synth-condense.md`   | `daily-synth.flow` |
+| `f/memory/synth_staleness`  | `prompts/synth-staleness.md`  | `daily-synth.flow` |
+| `f/memory/hotcache_digest`  | `prompts/hotcache-digest.md`  | `daily-synth.flow` |
+| `f/memory/distill_scan`     | `prompts/distill-scan.md`     | `daily-synth.flow` |
+| `f/memory/distill_write`    | `prompts/distill-write.md`    | `daily-synth.flow` |
+| `f/memory/taskmine_draft`   | `prompts/taskmine-draft.md`   | `taskmine.flow`    |
+| `f/memory/taskmine_cleanup` | `prompts/taskmine-cleanup.md` | `taskmine.flow`    |
 
 ## 5. Parameter variables
 
@@ -182,6 +183,22 @@ Promoted proposals are applied via `memoryctl proposal-apply`, one
 commit each (`distill: promote <name>` / `taskmine: <name>`), then
 pushed to `canonical.git` alongside everything else the run already
 committed.
+
+Taskmine additionally learns from the decision, both ways:
+
+- **Approved** — a cleanup step runs after promotion: for each promoted
+  skill, the entry refs in its Evidence section
+  (`<project-key>/<file>.md`) are extracted mechanically, and per
+  project a claude judge decides for each cited entry whether it is now
+  fully covered by the skill (delete), partially covered (trim, with a
+  pointer to the skill), or independently valuable (keep). Applied via
+  `ops-apply --allow-delete`, one commit per project
+  (`taskmine: cleanup <key> after <name>`).
+- **Rejected** — the rejected group names accumulate in
+  `/data/state/taskmine-rejected` (on the server volume) and are fed
+  into the next draft prompt as a do-not-re-propose list. The draft
+  prompt also receives the inventory of skills already in
+  `global/skills/` so promoted proposals don't come back either.
 
 ## 10. Known v1 simplifications (carried over from the implementation brief)
 
