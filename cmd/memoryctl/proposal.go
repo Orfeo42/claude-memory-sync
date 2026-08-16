@@ -123,9 +123,20 @@ func validateProposalTarget(p string) error {
 		return requireMarkdownSuffix(p)
 	case strings.HasPrefix(p, proposalSkillsPrefix), strings.HasPrefix(p, proposalAgentsPrefix):
 		return nil
+	case isProjectMemoryProposal(p):
+		return nil
 	default:
 		return errProposalPathNotAllowed
 	}
+}
+
+func isProjectMemoryProposal(p string) bool {
+	parts := strings.Split(p, "/")
+	if len(parts) != 4 || parts[0] != "projects" || parts[2] != "memory" {
+		return false
+	}
+	name := parts[3]
+	return parts[1] != "" && name != memoryIndexFile && strings.HasSuffix(name, ".md")
 }
 
 func requireMarkdownSuffix(p string) error {

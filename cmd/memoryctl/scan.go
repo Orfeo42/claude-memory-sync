@@ -221,7 +221,7 @@ func parseMemoryPath(path string) memoryPathInfo {
 	if len(segments) != 4 || segments[0] != "projects" || segments[2] != "memory" {
 		return memoryPathInfo{}
 	}
-	if !strings.HasSuffix(segments[3], ".md") || segments[3] == "MEMORY.md" {
+	if !strings.HasSuffix(segments[3], ".md") || segments[3] == memoryIndexFile {
 		return memoryPathInfo{}
 	}
 	return memoryPathInfo{Project: segments[1], Basename: segments[3], Matched: true}

@@ -78,7 +78,10 @@ export const RunList = ({
                 >
                   {decisionBadge(decisions[key])}
                 </span>{" "}
-                {item.group}
+                {item.group}{" "}
+                <span className={`kind-badge kind-${item.kind}`}>
+                  {item.kind}
+                </span>
               </div>
             );
           })}

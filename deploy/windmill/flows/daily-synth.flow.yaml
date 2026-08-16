@@ -417,12 +417,16 @@ value:
                         global/skills/*) group=$(printf '%s' "$target" | cut -d/ -f3) ;;
                         *) group=$(basename "$target") ;;
                       esac
+                      case "$target" in
+                        projects/*) pathspec="projects/$(printf '%s' "$target" | cut -d/ -f2)" ;;
+                        *) pathspec=global ;;
+                      esac
                       if [ "$approved" = "all" ] || printf ',%s,' "$approved" | grep -q ",$group,"; then
                         memoryctl proposal-apply --work-dir /data/work/canonical --file "$f"
                         memoryctl commit --work-dir /data/work/canonical \
                           --lock /data/state/canonical.lock \
                           --message "distill: promote $group" \
-                          --pathspec global
+                          --pathspec "$pathspec"
                         printf '%s\n' "$target" >> /tmp/promote-promoted
                       else
                         printf '%s\n' "$target" >> /tmp/promote-discarded
