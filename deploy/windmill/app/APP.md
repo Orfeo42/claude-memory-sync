@@ -1,70 +1,85 @@
-# Approval inbox App — assembly recipe
+# Approval inbox — full-code Windmill App
 
-A Windmill App that lists every suspended (approval-pending) run of
-`f/memory/taskmine` and `f/memory/daily_synth`, renders the staged
-proposals as markdown, and lets you resume with a selective `approved`
-value or cancel the run — no more digging through the Runs page.
+A full-code (React) Windmill App that lists every suspended
+(approval-pending) run of `f/memory/taskmine` and `f/memory/daily_synth`,
+renders the staged proposals as markdown, and lets you resume with a
+selective `approved` value or cancel the run.
 
-## Backend scripts
+Files in this directory, mirroring the in-browser editor's scaffold:
 
-Save each `*.py` in this directory as a workspace script first
-(**Scripts** → **New script** → language Python, paste content):
+| File                        | Role                                                    |
+| --------------------------- | ------------------------------------------------------- |
+| `index.tsx`                 | Entry point (createRoot, imports `index.css`).          |
+| `index.css`                 | All styles (layout, run rows, markdown panel, actions). |
+| `App.tsx`                   | State + backend calls, composes the two components.     |
+| `RunList.tsx`               | Left pane: pending runs, refresh, error/status lines.   |
+| `RunDetail.tsx`             | Right pane: rendered markdown, approved input, buttons. |
+| `types.ts`                  | `SuspendedRun` type + runtime guard + error helper.     |
+| `package.json`              | Frontend deps (react 19, react-dom, react-markdown).    |
+| `backend/list_suspended.py` | Runnable: suspended runs + their markdown payloads.     |
+| `backend/resume_run.py`     | Runnable: resume a run with `{approved: ...}`.          |
+| `backend/cancel_run.py`     | Runnable: cancel a run (discard the batch).             |
 
-| Script path suggestion          | File                | Purpose                                                            |
-| ------------------------------- | ------------------- | ------------------------------------------------------------------ |
-| `f/memory/app_list_suspended`   | `list_suspended.py` | List suspended runs of both approval flows + their markdown payload. |
-| `f/memory/app_resume_run`       | `resume_run.py`     | Resume a run with `{approved: ...}`.                               |
-| `f/memory/app_cancel_run`       | `cancel_run.py`     | Cancel a run (discard the whole batch).                            |
+Not in this directory because the editor generates them: `raw_app.yaml`,
+`wmill.d.ts` (regenerated from the backend runnables), and the `wmill`
+runtime module the frontend imports `backend` from.
 
-The scripts talk to the Windmill API directly through
-`BASE_INTERNAL_URL` + `WM_TOKEN` (both injected into every job by
-Windmill itself) — no extra secret or resource needed.
+The backend scripts talk to the Windmill API through `BASE_INTERNAL_URL`
 
-### TODO verify against the installed Windmill version
+- `WM_TOKEN` (injected into every job by Windmill) — no extra secret.
 
-Written against the documented API shape, not validated live yet. If a
-script errors, check these first (the API docs are served by your own
-instance at `http://<host>:8081/openapi.html`):
+## Setup — entirely in the Windmill UI
+
+1. Home page → **New** → **App (full-code)**. Framework: **React 19**.
+   Data: **none** (no datatable). Start **without AI**. Save the app as
+   `f/memory/approval_inbox`.
+2. In the runnables panel on the right, click **+** three times,
+   language **Python**, and create the runnables with these exact names
+   (the frontend calls them by name — the generated `wmill.d.ts` must
+   end up declaring `list_suspended`, `resume_run`, `cancel_run`):
+   - `list_suspended` — paste `backend/list_suspended.py`
+   - `resume_run` — paste `backend/resume_run.py`
+   - `cancel_run` — paste `backend/cancel_run.py`
+3. Open `package.json` in the editor and add to `dependencies`:
+   `"react-markdown": "^9.0.0"` (reference: this directory's
+   `package.json`; keep whatever else the scaffold put there).
+4. Mirror the frontend files: replace the scaffold's `App.tsx`,
+   `index.tsx`, `index.css` with this directory's versions, and create
+   `RunList.tsx`, `RunDetail.tsx`, `types.ts` as new files next to
+   `App.tsx`. The scaffold's `index.tsx` import style doesn't matter —
+   `App.tsx` exports both named and default.
+
+## Test / deploy (still in the editor)
+
+- Select `App.tsx` for the live preview pane, or click **Preview** for
+  fullscreen. Backend runnables execute on the real worker even in
+  preview.
+- Click **Deploy** in the toolbar — the app appears under **Apps** as
+  `f/memory/approval_inbox`.
+
+## TODO verify against the installed Windmill version
+
+The backend scripts were written against the documented API shape, not
+validated live yet. If a runnable errors, check these first (API docs
+served by your own instance at `http://<pi-host>:8081/openapi.html`):
 
 - `GET /w/{ws}/jobs/queue/list` query params `suspended` and
   `script_path_exact`.
 - Suspended step detection: `flow_status.modules[].type ==
-  "WaitingForEvents"` and its `job` field holding the step's job id.
+"WaitingForEvents"` and its `job` field holding the step's job id.
 - `GET /w/{ws}/jobs_u/completed/get_result/{id}` for the approval
   step's `{"markdown": ...}` result.
 - `POST /w/{ws}/jobs/flow/resume/{id}` (owner resume, body = resume
   payload) and `POST /w/{ws}/jobs_u/queue/cancel/{id}` (body
   `{"reason": ...}`).
+- The generated `wmill` module's exact import path/shape (`import
+{ backend } from './wmill'`) — align `App.tsx`'s import with whatever
+  the scaffold generates.
 
-## App assembly (UI)
+## Approval workflow once deployed
 
-**Apps** → **New app**, name it e.g. `f/memory/approval_inbox`, then:
-
-1. **Table** component (top of the canvas):
-   - Data source → **Select a script** → `f/memory/app_list_suspended`,
-     no arguments.
-   - Show columns `flow` and `started_at`; hide `markdown` and
-     `job_id` (they stay available on the selected row).
-2. **Markdown** component (below the table, make it tall):
-   - Content → connect to `<table-id>.selectedRow.markdown` (eval
-     input, e.g. `${a.selectedRow.markdown}` where `a` is the table's
-     component id).
-3. **Text input** component, id it `approved_input`:
-   - Default value `all`. Label: "approved — all | none |
-     comma-separated group names".
-4. **Button** "Resume":
-   - On click → run script `f/memory/app_resume_run` with
-     `job_id = <table-id>.selectedRow.job_id`,
-     `approved = approved_input.result` (connect both arguments to the
-     component outputs).
-   - After run: add the table's runnable to the button's
-     **Recompute others** list so the inbox refreshes.
-5. **Button** "Cancel run" (danger color):
-   - On click → `f/memory/app_cancel_run` with
-     `job_id = <table-id>.selectedRow.job_id`.
-   - Same recompute-table-after setting.
-
-Approval workflow from here on: open the App, click a row, read the
-rendered proposals, type the group names you want (or leave `all` /
-type `none`), hit Resume. Rejected groups are deleted from staging by
-the flow itself — nothing to clean up manually.
+Open the App, click a run, read the rendered proposals, type the group
+names you want in `approved` (or leave `all` / type `none`), hit
+**Resume**. Rejected groups are deleted from staging by the flow itself
+and remembered in the do-not-re-propose list — nothing to clean up
+manually. **Cancel run** discards the whole batch instead.

@@ -1,0 +1,195 @@
+:root {
+  --color-surface-primary: 251 251 253;
+  --color-surface-secondary: 239 239 244;
+  --color-surface-tertiary: 255 255 255;
+  --color-surface-sunken: 232 232 239;
+  --color-surface-input: 255 255 255;
+  --color-surface-selected: 255 255 255;
+  --color-surface-hover: 207 207 226 / 0.2;
+  --color-surface-accent-primary: 117 143 248;
+  --color-surface-accent-hover: 80 116 246;
+  --color-surface-accent-selected: 235 239 255;
+  --color-border-light: 229 231 235;
+  --color-border-normal: 156 163 175;
+  --color-border-accent: 44 91 235;
+  --color-border-selected: 160 175 250;
+  --color-component-button-accent-secondary: 255 255 255;
+  --color-text-primary: 61 71 88;
+  --color-text-secondary: 113 128 150;
+  --color-text-emphasis: 29 36 48;
+  --color-text-hint: 141 147 161;
+  --danger: #dc2626;
+  --success: #16a34a;
+}
+
+:root.windmill-dark {
+  --color-surface-primary: 46 52 65;
+  --color-surface-secondary: 39 44 53;
+  --color-surface-tertiary: 53 60 74;
+  --color-surface-sunken: 36 40 50;
+  --color-surface-input: 41 46 56;
+  --color-surface-selected: 67 76 94;
+  --color-surface-hover: 119 132 161 / 0.1;
+  --color-surface-accent-primary: 112 133 219;
+  --color-surface-accent-hover: 86 112 213;
+  --color-surface-accent-selected: 51 56 78;
+  --color-border-light: 55 68 87;
+  --color-border-normal: 169 176 186;
+  --color-border-accent: 160 175 250;
+  --color-border-selected: 100 117 183;
+  --color-component-button-accent-secondary: 243 244 246;
+  --color-text-primary: 212 215 221;
+  --color-text-secondary: 169 176 186;
+  --color-text-emphasis: 238 239 242;
+  --color-text-hint: 141 147 161;
+  --danger: #f87171;
+  --success: #4ade80;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 0.875rem;
+  color: rgb(var(--color-text-primary));
+  background: rgb(var(--color-surface-primary));
+}
+
+.page {
+  display: flex;
+  gap: 1rem;
+  padding: 1rem;
+  height: 100vh;
+}
+
+.run-list {
+  flex: 0 0 320px;
+  overflow-y: auto;
+  border-right: 1px solid rgb(var(--color-border-light));
+  padding-right: 1rem;
+}
+
+.run-list h2 {
+  margin-top: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: rgb(var(--color-text-emphasis));
+}
+
+.run-row {
+  padding: 0.5rem;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  border: 1px solid transparent;
+  margin-bottom: 0.25rem;
+}
+
+.run-row:hover {
+  background: rgb(var(--color-surface-hover));
+}
+
+.run-row.selected {
+  background: rgb(var(--color-surface-accent-selected));
+  border-color: rgb(var(--color-border-selected));
+}
+
+.run-row small {
+  color: rgb(var(--color-text-secondary));
+}
+
+.detail {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.markdown {
+  flex: 1;
+  overflow-y: auto;
+  border: 1px solid rgb(var(--color-border-light));
+  border-radius: 0.375rem;
+  padding: 0 1rem;
+  background: rgb(var(--color-surface-secondary));
+}
+
+.markdown pre {
+  overflow-x: auto;
+  background: rgb(var(--color-surface-sunken));
+  padding: 0.5rem;
+  border-radius: 0.25rem;
+}
+
+.markdown code {
+  background: rgb(var(--color-surface-sunken));
+  padding: 0.1rem 0.25rem;
+  border-radius: 0.25rem;
+}
+
+.actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.75rem;
+}
+
+.actions input {
+  flex: 1;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid rgb(var(--color-border-light));
+  border-radius: 0.375rem;
+  background: rgb(var(--color-surface-input));
+  color: rgb(var(--color-text-primary));
+}
+
+.actions input:focus {
+  outline: 2px solid rgb(var(--color-border-accent));
+  outline-offset: -1px;
+}
+
+button {
+  padding: 0.4rem 0.75rem;
+  border: 1px solid rgb(var(--color-border-light));
+  border-radius: 0.375rem;
+  background: rgb(var(--color-surface-tertiary));
+  color: rgb(var(--color-text-primary));
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+button:hover:not(:disabled) {
+  background: rgb(var(--color-surface-hover));
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: rgb(var(--color-surface-accent-primary));
+  border-color: rgb(var(--color-surface-accent-primary));
+  color: rgb(var(--color-component-button-accent-secondary));
+}
+
+button.primary:hover:not(:disabled) {
+  background: rgb(var(--color-surface-accent-hover));
+  border-color: rgb(var(--color-surface-accent-hover));
+}
+
+button.danger {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: transparent;
+}
+
+.error-text {
+  color: var(--danger);
+}
+
+.status-text {
+  color: var(--success);
+}
