@@ -1,51 +1,60 @@
-import * as React from 'react';
-import type { JSX } from 'react';
-import ReactMarkdown from 'react-markdown';
-import type { SuspendedRun } from './types';
+import * as React from "react";
+import type { JSX } from "react";
+import ReactMarkdown from "react-markdown";
+import type { Decision, ProposalItem } from "./types";
 
 type Props = {
-  run: SuspendedRun | null;
-  approved: string;
+  item: ProposalItem | null;
+  decision: Decision | undefined;
   busy: boolean;
-  onApprovedChange: (value: string) => void;
-  onResume: () => void;
-  onCancel: () => void;
+  onDecide: (decision: Decision) => void;
 };
 
 export const RunDetail = ({
-  run,
-  approved,
+  item,
+  decision,
   busy,
-  onApprovedChange,
-  onResume,
-  onCancel,
+  onDecide,
 }: Props): JSX.Element => {
-  if (run === null) {
+  if (item === null) {
     return (
       <div className="detail">
-        <p>Select a run to review its staged proposals.</p>
+        <p>Select a proposal to review it.</p>
       </div>
     );
   }
 
   return (
     <div className="detail">
+      <div className="detail-header">
+        <h3>{item.group}</h3>
+        <small>
+          {item.flow} — {new Date(item.started_at).toLocaleString()}
+        </small>
+      </div>
       <div className="markdown">
-        <ReactMarkdown>{run.markdown}</ReactMarkdown>
+        <ReactMarkdown>{item.content}</ReactMarkdown>
       </div>
       <div className="actions">
-        <label htmlFor="approved-input">approved:</label>
-        <input
-          id="approved-input"
-          value={approved}
-          onChange={(event) => onApprovedChange(event.target.value)}
-          placeholder="all | none | group,names"
-        />
-        <button type="button" className="primary" onClick={onResume} disabled={busy}>
-          Resume
+        <button
+          type="button"
+          className={decision === "approved" ? "primary" : ""}
+          onClick={() => {
+            onDecide("approved");
+          }}
+          disabled={busy}
+        >
+          {decision === "approved" ? "✓ Approved" : "Approve"}
         </button>
-        <button type="button" className="danger" onClick={onCancel} disabled={busy}>
-          Cancel run
+        <button
+          type="button"
+          className="danger"
+          onClick={() => {
+            onDecide("rejected");
+          }}
+          disabled={busy}
+        >
+          {decision === "rejected" ? "✗ Rejected" : "Reject"}
         </button>
       </div>
     </div>

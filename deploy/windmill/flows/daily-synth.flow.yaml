@@ -67,8 +67,11 @@ value:
           [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2; exit 1; }
 
           memoryctl ensure-work --repos-dir /data/repos --work-dir /data/work/canonical
-          rm -rf /tmp/proposals
-          mkdir -p /tmp/proposals
+          mkdir -p /data/state/proposals
+          find /data/state/proposals -mindepth 1 -maxdepth 1 -type d -mtime +14 -exec rm -rf {} +
+          staging="/data/state/proposals/${WM_ROOT_FLOW_JOB_ID:-${WM_FLOW_JOB_ID:-$WM_JOB_ID}}"
+          rm -rf "$staging"
+          mkdir -p "$staging"
         input_transforms: {}
 
     - id: corpus_list
@@ -302,7 +305,7 @@ value:
                   done >> "$prompt_file"
 
                 claude -p --model "$WM_MODEL" < "$prompt_file" \
-                  | memoryctl ops-apply --allow-delete --memory-dir "$memory_dir" --proposals-dir /tmp/proposals
+                  | memoryctl ops-apply --allow-delete --memory-dir "$memory_dir" --proposals-dir "/data/state/proposals/${WM_ROOT_FLOW_JOB_ID:-${WM_FLOW_JOB_ID:-$WM_JOB_ID}}"
 
                 memoryctl commit --work-dir /data/work/canonical \
                   --lock /data/state/canonical.lock \
@@ -326,9 +329,11 @@ value:
         language: bash
         content: |
           set -euo pipefail
-          if find /tmp/proposals -type f 2>/dev/null | grep -q .; then
+          staging="/data/state/proposals/${WM_ROOT_FLOW_JOB_ID:-${WM_FLOW_JOB_ID:-$WM_JOB_ID}}"
+          if find "$staging" -type f 2>/dev/null | grep -q .; then
             echo true
           else
+            rm -rf "$staging"
             echo false
           fi
         input_transforms: {}
@@ -353,22 +358,30 @@ value:
                   language: bash
                   content: |
                     set -euo pipefail
-                    md=$(mktemp)
-                    printf '# Staged proposals\n\n' > "$md"
-                    printf 'On **Resume**, set `approved` to `all`, `none`, or comma-separated group names.\n\n' >> "$md"
-                    for f in /tmp/proposals/*; do
-                      case "$f" in *.path) continue ;; esac
-                      target=$(cat "$f.path")
-                      case "$target" in
-                        global/skills/*) group=$(printf '%s' "$target" | cut -d/ -f3) ;;
-                        *) group=$(basename "$target") ;;
-                      esac
-                      printf '## %s\n\ntarget: `%s`\n\n````markdown\n' "$group" "$target" >> "$md"
-                      cat "$f" >> "$md"
-                      printf '\n````\n\n' >> "$md"
-                    done
-                    python3 -c 'import json,sys; print(json.dumps({"markdown": open(sys.argv[1]).read()}))' "$md" > ./result.json
-                    rm -f "$md"
+                    staging="/data/state/proposals/${WM_ROOT_FLOW_JOB_ID:-${WM_FLOW_JOB_ID:-$WM_JOB_ID}}"
+                    python3 - "$staging" <<'EOF' > ./result.json
+                    import json, pathlib, sys
+                    staging = pathlib.Path(sys.argv[1])
+                    groups = {}
+                    for f in sorted(staging.iterdir()):
+                        if f.name.endswith(".path") or not f.is_file():
+                            continue
+                        target = (staging / (f.name + ".path")).read_text().strip()
+                        parts = target.split("/")
+                        group = parts[2] if target.startswith("global/skills/") and len(parts) > 2 else parts[-1]
+                        groups.setdefault(group, []).append({"target": target, "content": f.read_text()})
+                    md = ["# Staged proposals\n"]
+                    md.append("On **Resume**, set `approved` to `all`, `none`, or comma-separated group names.\n")
+                    for group, files in groups.items():
+                        md.append(f"## {group}\n")
+                        for entry in files:
+                            md.append(f"target: `{entry['target']}`\n")
+                            md.append("````markdown\n" + entry["content"] + "\n````\n")
+                    print(json.dumps({
+                        "markdown": "\n".join(md),
+                        "groups": [{"name": g, "files": fs} for g, fs in groups.items()],
+                    }))
+                    EOF
                   input_transforms: {}
                 # TODO verify: suspend + resume_form field names for the
                 # installed Windmill version.
@@ -394,9 +407,10 @@ value:
                     set -euo pipefail
                     [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2; exit 1; }
 
+                    staging="/data/state/proposals/${WM_ROOT_FLOW_JOB_ID:-${WM_FLOW_JOB_ID:-$WM_JOB_ID}}"
                     approved=$(printf '%s' "$WM_APPROVED" | tr -d ' ')
                     rm -f /tmp/promote-promoted /tmp/promote-discarded
-                    for f in /tmp/proposals/*; do
+                    for f in "$staging"/*; do
                       case "$f" in *.path) continue ;; esac
                       target=$(cat "$f.path")
                       case "$target" in
@@ -424,6 +438,7 @@ value:
                     print(json.dumps({"promoted": lines("/tmp/promote-promoted"), "discarded": lines("/tmp/promote-discarded")}))
                     EOF
                     rm -f /tmp/promote-promoted /tmp/promote-discarded
+                    rm -rf "$staging"
                   input_transforms:
                     WM_APPROVED:
                       type: javascript

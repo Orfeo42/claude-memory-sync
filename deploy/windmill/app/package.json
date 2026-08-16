@@ -1,9 +1,25 @@
 {
   "name": "approval_inbox",
   "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . && prettier --check '*.{ts,tsx,css,json}'",
+    "lint:fix": "eslint --fix . && prettier --write '*.{ts,tsx,css,json}'"
+  },
   "dependencies": {
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^9.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "eslint": "^9.0.0",
+    "eslint-plugin-react-hooks": "^5.0.0",
+    "prettier": "^3.0.0",
+    "typescript": "^5.5.0",
+    "typescript-eslint": "^8.0.0"
   }
 }

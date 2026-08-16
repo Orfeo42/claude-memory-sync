@@ -2,3 +2,4 @@
 *.sync-conflict-*
 .obsidian/
 .claude/
+**/__pycache__/
