@@ -10,27 +10,6 @@ services:
       - "8080:8080"
     restart: unless-stopped
 
-  memory-synthesizer:
-    image: ghcr.io/orfeo42/claude-memory-sync-synthesizer:latest
-    volumes:
-      - memory-data:/data
-    environment:
-      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
-      SYNTH_INTERVAL: ${SYNTH_INTERVAL:-24h}
-      SYNTH_MODEL: ${SYNTH_MODEL:-sonnet}
-    restart: unless-stopped
-
-  memory-intake:
-    image: ghcr.io/orfeo42/claude-memory-sync-synthesizer:latest
-    entrypoint: ["/usr/local/bin/intake-run.sh"]
-    volumes:
-      - memory-data:/data
-    environment:
-      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
-      INTAKE_INTERVAL: ${INTAKE_INTERVAL:-45m}
-      SYNTH_MODEL: ${SYNTH_MODEL:-sonnet}
-    restart: unless-stopped
-
   memory-backup:
     image: alpine/git
     profiles:
