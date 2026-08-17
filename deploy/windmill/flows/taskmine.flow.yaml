@@ -1,19 +1,12 @@
-# Windmill OpenFlow template — import via the Windmill UI/CLI and expect to
-# adjust module/suspend syntax to match the running Windmill version. See
-# deploy/windmill/setup.md ("Flow YAML caveat") before trusting this file
-# verbatim.
-#
-# Schedule: weekly. Concurrency: 1 (serialize with itself).
 summary: memory-taskmine
-description: >
-  Harness-improvement miner: scans the whole canonical corpus for repeated
-  manual procedures worth turning into a reusable zsh function, script, or
-  Claude Code skill. Always proposal-only (global/skills/**), never
-  auto-applied. Prompt text lives in the Windmill variable
-  f/memory/taskmine_draft (default body: deploy/windmill/prompts/taskmine-draft.md).
+description: 'Harness-improvement miner: scans the whole canonical corpus for repeated manual procedures
+  worth turning into a reusable zsh function, script, or Claude Code skill. Always proposal-only (global/skills/**),
+  never auto-applied. Prompt text lives in the Windmill variable f/memory/taskmine_draft (default body:
+  deploy/windmill/prompts/taskmine-draft.md).
 
+  '
 schema:
-  $schema: "https://json-schema.org/draft/2020-12/schema"
+  $schema: https://json-schema.org/draft/2020-12/schema
   type: object
   properties:
     synth_model:
@@ -22,312 +15,199 @@ schema:
       description: claude -p --model value. Windmill variable f/memory/synth_model.
     taskmine_draft_prompt:
       type: string
-      default: "$var:f/memory/taskmine_draft"
+      default: $var:f/memory/taskmine_draft
       description: deploy/windmill/prompts/taskmine-draft.md
     taskmine_cleanup_prompt:
       type: string
-      default: "$var:f/memory/taskmine_cleanup"
+      default: $var:f/memory/taskmine_cleanup
       description: deploy/windmill/prompts/taskmine-cleanup.md
   required: []
-
 value:
-  # TODO verify: exact field names for the installed Windmill version.
   concurrent_limit: 1
   concurrency_time_window_s: 0
-
   modules:
-    - id: ensure_work
-      value:
-        type: rawscript
-        language: bash
-        content: |
-          set -euo pipefail
-          [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2; exit 1; }
+  - id: ensure_work
+    value:
+      type: rawscript
+      language: bash
+      content: 'set -euo pipefail
 
-          memoryctl ensure-work --repos-dir /data/repos --work-dir /data/work/canonical
-          mkdir -p /data/state/proposals
-          find /data/state/proposals -mindepth 1 -maxdepth 1 -type d -mtime +14 -exec rm -rf {} +
-          staging="/data/state/proposals/${WM_ROOT_FLOW_JOB_ID:-${WM_FLOW_JOB_ID:-$WM_JOB_ID}}"
-          rm -rf "$staging"
-          mkdir -p "$staging"
-        input_transforms: {}
+        [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2;
+        exit 1; }
 
-    - id: draft
-      summary: mine the corpus for repeated manual procedures worth a skill
-      value:
-        type: rawscript
-        language: bash
-        content: |
-          WM_TASKMINE_PROMPT="$1"
-          WM_MODEL="$2"
-          set -euo pipefail
-          [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2; exit 1; }
 
-          prompt_file=$(mktemp)
-          trap 'rm -f "$prompt_file"' EXIT
-          printf '%s\n\n' "$WM_TASKMINE_PROMPT" > "$prompt_file"
+        memoryctl ensure-work --repos-dir /data/repos --work-dir /data/work/canonical
 
-          printf '=== existing skills — patterns already covered, do NOT re-propose ===\n' >> "$prompt_file"
-          for skill in /data/work/canonical/global/skills/*/SKILL.md; do
-            [ -f "$skill" ] || continue
-            name=$(basename "$(dirname "$skill")")
-            desc=$(awk '/^description:/{sub(/^description:[[:space:]]*/,""); print; exit}' "$skill")
-            printf -- '- %s: %s\n' "$name" "$desc" >> "$prompt_file"
-          done
-          printf '\n' >> "$prompt_file"
+        mkdir -p /data/state/proposals
 
-          if [ -s /data/state/taskmine-rejected ]; then
-            printf '=== previously rejected proposals — do NOT re-propose ===\n' >> "$prompt_file"
-            cat /data/state/taskmine-rejected >> "$prompt_file"
-            printf '\n' >> "$prompt_file"
-          fi
+        find /data/state/proposals -mindepth 1 -maxdepth 1 -type d -mtime +14 -exec rm -rf {} +
 
-          staging="/data/state/proposals/${WM_ROOT_FLOW_JOB_ID:-${WM_FLOW_JOB_ID:-$WM_JOB_ID}}"
-          pending=$(find /data/state/proposals -mindepth 2 -name '*.path' ! -path "$staging/*" 2>/dev/null \
-            | while IFS= read -r p; do
-                target=$(cat "$p")
-                case "$target" in
-                  global/skills/*) printf '%s\n' "$target" | cut -d/ -f3 ;;
-                  *) basename "$target" ;;
-                esac
-              done | sort -u)
-          if [ -n "$pending" ]; then
-            printf '=== proposals currently pending human review — do NOT re-propose ===\n' >> "$prompt_file"
-            printf '%s\n\n' "$pending" >> "$prompt_file"
-          fi
+        staging="/data/state/proposals/${WM_ROOT_FLOW_JOB_ID:-${WM_FLOW_JOB_ID:-$WM_JOB_ID}}"
 
-          memoryctl corpus list --work-dir /data/work/canonical \
-            | python3 -c 'import json,sys; [print(p["key"]) for p in json.load(sys.stdin)]' \
-            | while IFS= read -r key; do
-                index="/data/work/canonical/projects/$key/memory/MEMORY.md"
-                [ -f "$index" ] || continue
-                printf '=== project: %s ===\n' "$key"
-                cat "$index"
-                printf '\n'
-              done >> "$prompt_file"
+        rm -rf "$staging"
 
-          claude -p --model "$WM_MODEL" < "$prompt_file" \
-            | memoryctl ops-apply --proposals-dir "$staging"
-        input_transforms:
-          WM_TASKMINE_PROMPT:
-            type: javascript
-            expr: flow_input.taskmine_draft_prompt
-          WM_MODEL:
-            type: javascript
-            expr: flow_input.synth_model
+        mkdir -p "$staging"
 
-    - id: check_proposals
-      summary: any taskmine proposals staged in /tmp/proposals?
-      value:
-        type: rawscript
-        language: bash
-        content: |
-          set -euo pipefail
-          staging="/data/state/proposals/${WM_ROOT_FLOW_JOB_ID:-${WM_FLOW_JOB_ID:-$WM_JOB_ID}}"
-          if find "$staging" -type f 2>/dev/null | grep -q .; then
-            echo true
-          else
-            rm -rf "$staging"
-            echo false
-          fi
-        input_transforms: {}
+        '
+      input_transforms: {}
+  - id: draft
+    summary: mine the corpus for repeated manual procedures worth a skill
+    value:
+      type: rawscript
+      language: bash
+      content: "WM_TASKMINE_PROMPT=\"$1\"\nWM_MODEL=\"$2\"\nset -euo pipefail\n[ -z \"${ANTHROPIC_API_KEY:-}\"\
+        \ ] || { echo \"ANTHROPIC_API_KEY set — refusing (API credits)\" >&2; exit 1; }\n\nprompt_file=$(mktemp)\n\
+        trap 'rm -f \"$prompt_file\"' EXIT\nprintf '%s\\n\\n' \"$WM_TASKMINE_PROMPT\" > \"$prompt_file\"\
+        \n\nprintf '=== existing skills — patterns already covered, do NOT re-propose ===\\n' >> \"$prompt_file\"\
+        \nfor skill in /data/work/canonical/global/skills/*/SKILL.md; do\n  [ -f \"$skill\" ] || continue\n\
+        \  name=$(basename \"$(dirname \"$skill\")\")\n  desc=$(awk '/^description:/{sub(/^description:[[:space:]]*/,\"\
+        \"); print; exit}' \"$skill\")\n  printf -- '- %s: %s\\n' \"$name\" \"$desc\" >> \"$prompt_file\"\
+        \ndone\nprintf '\\n' >> \"$prompt_file\"\n\nif [ -s /data/state/taskmine-rejected ]; then\n  printf\
+        \ '=== previously rejected proposals — do NOT re-propose ===\\n' >> \"$prompt_file\"\n  cat /data/state/taskmine-rejected\
+        \ >> \"$prompt_file\"\n  printf '\\n' >> \"$prompt_file\"\nfi\n\nstaging=\"/data/state/proposals/${WM_ROOT_FLOW_JOB_ID:-${WM_FLOW_JOB_ID:-$WM_JOB_ID}}\"\
+        \npending=$(find /data/state/proposals -mindepth 2 -name '*.path' ! -path \"$staging/*\" 2>/dev/null\
+        \ \\\n  | while IFS= read -r p; do\n      target=$(cat \"$p\")\n      case \"$target\" in\n  \
+        \      global/skills/*) printf '%s\\n' \"$target\" | cut -d/ -f3 ;;\n        *) basename \"$target\"\
+        \ ;;\n      esac\n    done | sort -u)\nif [ -n \"$pending\" ]; then\n  printf '=== proposals currently\
+        \ pending human review — do NOT re-propose ===\\n' >> \"$prompt_file\"\n  printf '%s\\n\\n' \"\
+        $pending\" >> \"$prompt_file\"\nfi\n\nmemoryctl corpus list --work-dir /data/work/canonical \\\
+        \n  | python3 -c 'import json,sys; [print(p[\"key\"]) for p in json.load(sys.stdin)]' \\\n  |\
+        \ while IFS= read -r key; do\n      index=\"/data/work/canonical/projects/$key/memory/MEMORY.md\"\
+        \n      [ -f \"$index\" ] || continue\n      printf '=== project: %s ===\\n' \"$key\"\n      cat\
+        \ \"$index\"\n      printf '\\n'\n    done >> \"$prompt_file\"\n\nclaude -p --model \"$WM_MODEL\"\
+        \ < \"$prompt_file\" \\\n  | memoryctl ops-apply --proposals-dir \"$staging\"\n"
+      input_transforms:
+        WM_TASKMINE_PROMPT:
+          type: static
+          value: $var:f/memory/taskmine_draft
+        WM_MODEL:
+          type: static
+          value: $var:f/memory/synth_model
+  - id: check_proposals
+    summary: any taskmine proposals staged in /tmp/proposals?
+    value:
+      type: rawscript
+      language: bash
+      content: "set -euo pipefail\nstaging=\"/data/state/proposals/${WM_ROOT_FLOW_JOB_ID:-${WM_FLOW_JOB_ID:-$WM_JOB_ID}}\"\
+        \nif find \"$staging\" -type f 2>/dev/null | grep -q .; then\n  echo true\nelse\n  rm -rf \"$staging\"\
+        \n  echo false\nfi\n"
+      input_transforms: {}
+  - id: promote_if_approved
+    value:
+      type: branchone
+      branches:
+      - summary: proposals staged — ask for approval, then promote + push
+        expr: results.check_proposals === 'true'
+        modules:
+        - id: taskmine_approval
+          summary: 'Approval gate. Output groups staged proposals by skill name. On Resume, fill the form
+            field "approved" with "all", "none", or a comma-separated list of the group names to promote
+            — only those are promoted, the rest are deleted.
 
-    # TODO verify: branchone syntax (branches[].expr + branches[].modules,
-    # default[]) for the installed Windmill version.
-    - id: promote_if_approved
-      value:
-        type: branchone
-        branches:
-          - summary: proposals staged — ask for approval, then promote + push
-            expr: "results.check_proposals === 'true'"
-            modules:
-              - id: taskmine_approval
-                summary: >
-                  Approval gate. Output groups staged proposals by skill
-                  name. On Resume, fill the form field "approved" with
-                  "all", "none", or a comma-separated list of the group
-                  names to promote — only those are promoted, the rest are
-                  deleted.
-                value:
-                  type: rawscript
-                  language: bash
-                  content: |
-                    set -euo pipefail
-                    staging="/data/state/proposals/${WM_ROOT_FLOW_JOB_ID:-${WM_FLOW_JOB_ID:-$WM_JOB_ID}}"
-                    python3 - "$staging" <<'EOF' > ./result.json
-                    import json, pathlib, sys
-                    staging = pathlib.Path(sys.argv[1])
-                    groups = {}
-                    for f in sorted(staging.iterdir()):
-                        if f.name.endswith(".path") or not f.is_file():
-                            continue
-                        target = (staging / (f.name + ".path")).read_text().strip()
-                        parts = target.split("/")
-                        group = parts[2] if target.startswith("global/skills/") and len(parts) > 2 else parts[-1]
-                        groups.setdefault(group, []).append({"target": target, "content": f.read_text()})
-                    md = ["# Staged proposals\n"]
-                    md.append("On **Resume**, set `approved` to `all`, `none`, or comma-separated group names.\n")
-                    for group, files in groups.items():
-                        md.append(f"## {group}\n")
-                        for entry in files:
-                            md.append(f"target: `{entry['target']}`\n")
-                            md.append("````markdown\n" + entry["content"] + "\n````\n")
-                    print(json.dumps({
-                        "markdown": "\n".join(md),
-                        "groups": [{"name": g, "files": fs} for g, fs in groups.items()],
-                    }))
-                    EOF
-                  input_transforms: {}
-                # TODO verify: suspend + resume_form field names for the
-                # installed Windmill version.
-                suspend:
-                  required_events: 1
-                  timeout: 604800
-                  resume_form:
-                    schema:
-                      type: object
-                      properties:
-                        approved:
-                          type: string
-                          default: all
-                          description: >
-                            all | none | comma-separated group names to promote
+            '
+          value:
+            type: rawscript
+            language: bash
+            content: "set -euo pipefail\nstaging=\"/data/state/proposals/${WM_ROOT_FLOW_JOB_ID:-${WM_FLOW_JOB_ID:-$WM_JOB_ID}}\"\
+              \npython3 - \"$staging\" <<'EOF' > ./result.json\nimport json, pathlib, sys\nstaging = pathlib.Path(sys.argv[1])\n\
+              groups = {}\nfor f in sorted(staging.iterdir()):\n    if f.name.endswith(\".path\") or not\
+              \ f.is_file():\n        continue\n    target = (staging / (f.name + \".path\")).read_text().strip()\n\
+              \    parts = target.split(\"/\")\n    group = parts[2] if target.startswith(\"global/skills/\"\
+              ) and len(parts) > 2 else parts[-1]\n    groups.setdefault(group, []).append({\"target\"\
+              : target, \"content\": f.read_text()})\nmd = [\"# Staged proposals\\n\"]\nmd.append(\"On\
+              \ **Resume**, set `approved` to `all`, `none`, or comma-separated group names.\\n\")\nfor\
+              \ group, files in groups.items():\n    md.append(f\"## {group}\\n\")\n    for entry in files:\n\
+              \        md.append(f\"target: `{entry['target']}`\\n\")\n        md.append(\"````markdown\\\
+              n\" + entry[\"content\"] + \"\\n````\\n\")\nprint(json.dumps({\n    \"markdown\": \"\\n\"\
+              .join(md),\n    \"groups\": [{\"name\": g, \"files\": fs} for g, fs in groups.items()],\n\
+              }))\nEOF\n"
+            input_transforms: {}
+          suspend:
+            required_events: 1
+            timeout: 604800
+            resume_form:
+              schema:
+                type: object
+                properties:
+                  approved:
+                    type: string
+                    default: all
+                    description: 'all | none | comma-separated group names to promote
 
-              - id: taskmine_promote
-                value:
-                  type: rawscript
-                  language: bash
-                  content: |
-                    WM_APPROVED="$1"
-                    set -euo pipefail
-                    [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2; exit 1; }
+                      '
+        - id: taskmine_promote
+          value:
+            type: rawscript
+            language: bash
+            content: "WM_APPROVED=\"$1\"\nset -euo pipefail\n[ -z \"${ANTHROPIC_API_KEY:-}\" ] || { echo\
+              \ \"ANTHROPIC_API_KEY set — refusing (API credits)\" >&2; exit 1; }\n\nstaging=\"/data/state/proposals/${WM_ROOT_FLOW_JOB_ID:-${WM_FLOW_JOB_ID:-$WM_JOB_ID}}\"\
+              \napproved=$(printf '%s' \"$WM_APPROVED\" | tr -d ' ')\nrm -f /tmp/promote-promoted /tmp/promote-discarded\
+              \ /tmp/promote-rejected-groups\nfor f in \"$staging\"/*; do\n  case \"$f\" in *.path) continue\
+              \ ;; esac\n  target=$(cat \"$f.path\")\n  case \"$target\" in\n    global/skills/*) group=$(printf\
+              \ '%s' \"$target\" | cut -d/ -f3) ;;\n    *) group=$(basename \"$target\") ;;\n  esac\n\
+              \  case \"$target\" in\n    projects/*) pathspec=\"projects/$(printf '%s' \"$target\" |\
+              \ cut -d/ -f2)\" ;;\n    *) pathspec=global ;;\n  esac\n  if [ \"$approved\" = \"all\" ]\
+              \ || printf ',%s,' \"$approved\" | grep -q \",$group,\"; then\n    memoryctl proposal-apply\
+              \ --work-dir /data/work/canonical --file \"$f\"\n    memoryctl commit --work-dir /data/work/canonical\
+              \ \\\n      --lock /data/state/canonical.lock \\\n      --message \"taskmine: $group\" \\\
+              \n      --pathspec \"$pathspec\"\n    printf '%s\\n' \"$target\" >> /tmp/promote-promoted\n\
+              \  else\n    printf '%s\\n' \"$target\" >> /tmp/promote-discarded\n    printf '%s\\n' \"\
+              $group\" >> /tmp/promote-rejected-groups\n  fi\n  rm -f \"$f\" \"$f.path\"\ndone\n\nif [\
+              \ -s /tmp/promote-rejected-groups ]; then\n  touch /data/state/taskmine-rejected\n  sort\
+              \ -u /tmp/promote-rejected-groups /data/state/taskmine-rejected > /data/state/taskmine-rejected.tmp\n\
+              \  mv /data/state/taskmine-rejected.tmp /data/state/taskmine-rejected\nfi\nrm -f /tmp/promote-rejected-groups\n\
+              rm -rf \"$staging\"\n\nmemoryctl push --work-dir /data/work/canonical --lock /data/state/canonical.lock\n\
+              \npython3 - <<'EOF' > ./result.json\nimport json, pathlib\ndef lines(p):\n    f = pathlib.Path(p)\n\
+              \    return f.read_text().splitlines() if f.exists() else []\nprint(json.dumps({\"promoted\"\
+              : lines(\"/tmp/promote-promoted\"), \"discarded\": lines(\"/tmp/promote-discarded\")}))\n\
+              EOF\nrm -f /tmp/promote-promoted /tmp/promote-discarded\n"
+            input_transforms:
+              WM_APPROVED:
+                type: javascript
+                expr: resume?.approved ?? 'all'
+        - id: taskmine_cleanup
+          summary: 'Delete/trim memory entries now covered by the promoted skills. Per promoted skill,
+            the Evidence section''s entry refs are extracted mechanically; per project a claude judge
+            decides delete / trim / keep, applied via ops-apply with --allow-delete.
 
-                    staging="/data/state/proposals/${WM_ROOT_FLOW_JOB_ID:-${WM_FLOW_JOB_ID:-$WM_JOB_ID}}"
-                    approved=$(printf '%s' "$WM_APPROVED" | tr -d ' ')
-                    rm -f /tmp/promote-promoted /tmp/promote-discarded /tmp/promote-rejected-groups
-                    for f in "$staging"/*; do
-                      case "$f" in *.path) continue ;; esac
-                      target=$(cat "$f.path")
-                      case "$target" in
-                        global/skills/*) group=$(printf '%s' "$target" | cut -d/ -f3) ;;
-                        *) group=$(basename "$target") ;;
-                      esac
-                      case "$target" in
-                        projects/*) pathspec="projects/$(printf '%s' "$target" | cut -d/ -f2)" ;;
-                        *) pathspec=global ;;
-                      esac
-                      if [ "$approved" = "all" ] || printf ',%s,' "$approved" | grep -q ",$group,"; then
-                        memoryctl proposal-apply --work-dir /data/work/canonical --file "$f"
-                        memoryctl commit --work-dir /data/work/canonical \
-                          --lock /data/state/canonical.lock \
-                          --message "taskmine: $group" \
-                          --pathspec "$pathspec"
-                        printf '%s\n' "$target" >> /tmp/promote-promoted
-                      else
-                        printf '%s\n' "$target" >> /tmp/promote-discarded
-                        printf '%s\n' "$group" >> /tmp/promote-rejected-groups
-                      fi
-                      rm -f "$f" "$f.path"
-                    done
-
-                    if [ -s /tmp/promote-rejected-groups ]; then
-                      touch /data/state/taskmine-rejected
-                      sort -u /tmp/promote-rejected-groups /data/state/taskmine-rejected > /data/state/taskmine-rejected.tmp
-                      mv /data/state/taskmine-rejected.tmp /data/state/taskmine-rejected
-                    fi
-                    rm -f /tmp/promote-rejected-groups
-                    rm -rf "$staging"
-
-                    memoryctl push --work-dir /data/work/canonical --lock /data/state/canonical.lock
-
-                    python3 - <<'EOF' > ./result.json
-                    import json, pathlib
-                    def lines(p):
-                        f = pathlib.Path(p)
-                        return f.read_text().splitlines() if f.exists() else []
-                    print(json.dumps({"promoted": lines("/tmp/promote-promoted"), "discarded": lines("/tmp/promote-discarded")}))
-                    EOF
-                    rm -f /tmp/promote-promoted /tmp/promote-discarded
-                  input_transforms:
-                    WM_APPROVED:
-                      type: javascript
-                      expr: resume?.approved ?? 'all'
-
-              - id: taskmine_cleanup
-                summary: >
-                  Delete/trim memory entries now covered by the promoted
-                  skills. Per promoted skill, the Evidence section's
-                  entry refs are extracted mechanically; per project a
-                  claude judge decides delete / trim / keep, applied via
-                  ops-apply with --allow-delete.
-                value:
-                  type: rawscript
-                  language: bash
-                  content: |
-                    WM_PROMOTED_JSON="$1"
-                    WM_CLEANUP_PROMPT="$2"
-                    WM_MODEL="$3"
-                    set -euo pipefail
-                    [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2; exit 1; }
-
-                    printf '%s' "$WM_PROMOTED_JSON" \
-                      | python3 -c 'import json,sys; [print(t) for t in json.load(sys.stdin)]' > /tmp/promoted-targets
-
-                    cleaned=0
-                    while IFS= read -r target; do
-                      case "$target" in global/skills/*/SKILL.md) ;; *) continue ;; esac
-                      skill_file="/data/work/canonical/$target"
-                      [ -f "$skill_file" ] || continue
-                      group=$(printf '%s' "$target" | cut -d/ -f3)
-
-                      awk '/^#+[[:space:]]*Evidence/{f=1;next} /^#+[[:space:]]/{f=0} f' "$skill_file" \
-                        | grep -oE '[a-z0-9][a-z0-9-]*/[A-Za-z0-9._-]+\.md' | sort -u > /tmp/evidence-refs || true
-                      [ -s /tmp/evidence-refs ] || continue
-
-                      for key in $(cut -d/ -f1 /tmp/evidence-refs | sort -u); do
-                        memory_dir="/data/work/canonical/projects/$key/memory"
-                        [ -d "$memory_dir" ] || continue
-
-                        prompt_file=$(mktemp)
-                        printf '%s\n\n=== new skill: %s ===\n' "$WM_CLEANUP_PROMPT" "$group" > "$prompt_file"
-                        cat "$skill_file" >> "$prompt_file"
-                        printf '\n=== candidate entries (project: %s) ===\n' "$key" >> "$prompt_file"
-
-                        found=0
-                        while IFS= read -r ref; do
-                          [ "${ref%%/*}" = "$key" ] || continue
-                          entry="$memory_dir/${ref#*/}"
-                          [ -f "$entry" ] || continue
-                          found=1
-                          printf '===ENTRY: %s===\n' "${ref#*/}" >> "$prompt_file"
-                          cat "$entry" >> "$prompt_file"
-                          printf '\n' >> "$prompt_file"
-                        done < /tmp/evidence-refs
-                        if [ "$found" = 0 ]; then rm -f "$prompt_file"; continue; fi
-
-                        claude -p --model "$WM_MODEL" < "$prompt_file" \
-                          | memoryctl ops-apply --allow-delete --memory-dir "$memory_dir"
-                        rm -f "$prompt_file"
-
-                        memoryctl commit --work-dir /data/work/canonical \
-                          --lock /data/state/canonical.lock \
-                          --message "taskmine: cleanup $key after $group" \
-                          --pathspec "projects/$key"
-                        cleaned=1
-                      done
-                    done < /tmp/promoted-targets
-                    rm -f /tmp/promoted-targets /tmp/evidence-refs
-
-                    [ "$cleaned" = 0 ] || memoryctl push --work-dir /data/work/canonical --lock /data/state/canonical.lock
-                    echo "cleaned=$cleaned"
-                  input_transforms:
-                    WM_PROMOTED_JSON:
-                      type: javascript
-                      expr: JSON.stringify(results.taskmine_promote?.promoted ?? [])
-                    WM_CLEANUP_PROMPT:
-                      type: javascript
-                      expr: flow_input.taskmine_cleanup_prompt
-                    WM_MODEL:
-                      type: javascript
-                      expr: flow_input.synth_model
-        default: []
+            '
+          value:
+            type: rawscript
+            language: bash
+            content: "WM_PROMOTED_JSON=\"$1\"\nWM_CLEANUP_PROMPT=\"$2\"\nWM_MODEL=\"$3\"\nset -euo pipefail\n\
+              [ -z \"${ANTHROPIC_API_KEY:-}\" ] || { echo \"ANTHROPIC_API_KEY set — refusing (API credits)\"\
+              \ >&2; exit 1; }\n\nprintf '%s' \"$WM_PROMOTED_JSON\" \\\n  | python3 -c 'import json,sys;\
+              \ [print(t) for t in json.load(sys.stdin)]' > /tmp/promoted-targets\n\ncleaned=0\nwhile\
+              \ IFS= read -r target; do\n  case \"$target\" in global/skills/*/SKILL.md) ;; *) continue\
+              \ ;; esac\n  skill_file=\"/data/work/canonical/$target\"\n  [ -f \"$skill_file\" ] || continue\n\
+              \  group=$(printf '%s' \"$target\" | cut -d/ -f3)\n\n  awk '/^#+[[:space:]]*Evidence/{f=1;next}\
+              \ /^#+[[:space:]]/{f=0} f' \"$skill_file\" \\\n    | grep -oE '[a-z0-9][a-z0-9-]*/[A-Za-z0-9._-]+\\\
+              .md' | sort -u > /tmp/evidence-refs || true\n  [ -s /tmp/evidence-refs ] || continue\n\n\
+              \  for key in $(cut -d/ -f1 /tmp/evidence-refs | sort -u); do\n    memory_dir=\"/data/work/canonical/projects/$key/memory\"\
+              \n    [ -d \"$memory_dir\" ] || continue\n\n    prompt_file=$(mktemp)\n    printf '%s\\\
+              n\\n=== new skill: %s ===\\n' \"$WM_CLEANUP_PROMPT\" \"$group\" > \"$prompt_file\"\n   \
+              \ cat \"$skill_file\" >> \"$prompt_file\"\n    printf '\\n=== candidate entries (project:\
+              \ %s) ===\\n' \"$key\" >> \"$prompt_file\"\n\n    found=0\n    while IFS= read -r ref; do\n\
+              \      [ \"${ref%%/*}\" = \"$key\" ] || continue\n      entry=\"$memory_dir/${ref#*/}\"\n\
+              \      [ -f \"$entry\" ] || continue\n      found=1\n      printf '===ENTRY: %s===\\n' \"\
+              ${ref#*/}\" >> \"$prompt_file\"\n      cat \"$entry\" >> \"$prompt_file\"\n      printf\
+              \ '\\n' >> \"$prompt_file\"\n    done < /tmp/evidence-refs\n    if [ \"$found\" = 0 ]; then\
+              \ rm -f \"$prompt_file\"; continue; fi\n\n    claude -p --model \"$WM_MODEL\" < \"$prompt_file\"\
+              \ \\\n      | memoryctl ops-apply --allow-delete --memory-dir \"$memory_dir\"\n    rm -f\
+              \ \"$prompt_file\"\n\n    memoryctl commit --work-dir /data/work/canonical \\\n      --lock\
+              \ /data/state/canonical.lock \\\n      --message \"taskmine: cleanup $key after $group\"\
+              \ \\\n      --pathspec \"projects/$key\"\n    cleaned=1\n  done\ndone < /tmp/promoted-targets\n\
+              rm -f /tmp/promoted-targets /tmp/evidence-refs\n\n[ \"$cleaned\" = 0 ] || memoryctl push\
+              \ --work-dir /data/work/canonical --lock /data/state/canonical.lock\necho \"cleaned=$cleaned\"\
+              \n"
+            input_transforms:
+              WM_PROMOTED_JSON:
+                type: javascript
+                expr: JSON.stringify(results.taskmine_promote?.promoted ?? [])
+              WM_CLEANUP_PROMPT:
+                type: static
+                value: $var:f/memory/taskmine_cleanup
+              WM_MODEL:
+                type: static
+                value: $var:f/memory/synth_model
+      default: []

@@ -16,20 +16,24 @@ If the package is private, log in first:
 Deploy or update with:
 `docker compose pull memory-server && docker compose up -d memory-server`.
 
-## Synthesizer (daily condense/dedup)
+## Synthesis pipeline (Windmill)
 
-`memory-synthesizer` runs a daily LLM pass over `canonical/` memory:
-merges duplicate entries, one git commit per project, revertable.
+The LLM synthesis passes (intake judgment, daily condense/dedup +
+hot-cache, weekly task mining) run as Windmill flows on the
+`windmill-server`/`windmill-worker` services — setup runbook:
+`deploy/windmill/setup.md`. The worker image bundles `memoryctl`, git,
+and the `claude` CLI.
 
 One-time setup: run `claude setup-token` on a machine with a browser
 (subscription OAuth, valid 1 year), put the printed token in `.env` as
-`CLAUDE_CODE_OAUTH_TOKEN`. Never set `ANTHROPIC_API_KEY` in the
-environment — it would take precedence and bill API credits; the
-service refuses to start if it is present. Optional: `SYNTH_INTERVAL`
-(default `24h`), `SYNTH_MODEL` (default `sonnet`).
+`CLAUDE_CODE_OAUTH_TOKEN` (required by `windmill-worker`). Never set
+`ANTHROPIC_API_KEY` in the environment — it would take precedence and
+bill API credits; every flow step refuses to run if it is present.
+`WINDMILL_DB_PASSWORD` must also be set in `.env`.
 
-Start: `docker compose up -d memory-synthesizer`. Without the token
-set, the other services still deploy fine; only the synthesizer exits.
+Start: `docker compose up -d windmill-db windmill-server
+windmill-worker`. The Windmill UI is on port 8081; flow schedules
+replace the old `SYNTH_INTERVAL`/`INTAKE_INTERVAL` env tuning.
 
 ## Backup
 
