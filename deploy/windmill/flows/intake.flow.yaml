@@ -1,199 +1,140 @@
-# Windmill OpenFlow template — import via the Windmill UI/CLI and expect to
-# adjust module/suspend syntax to match the running Windmill version. See
-# deploy/windmill/setup.md ("Flow YAML caveat") before trusting this file
-# verbatim. Ports build/synthesizer/intake.sh.
-#
-# Schedule: every 45 minutes. Concurrency: 1 (serialize with itself).
 summary: memory-intake
-description: >
-  Per-client novelty judgment for projects/*/memory candidates, plus
-  mechanical last-writer-wins merge for global/ config trees. Prompt text
-  for the judge step lives in the Windmill variable f/memory/intake_judge
+description: 'Per-client novelty judgment for projects/*/memory candidates, plus mechanical last-writer-wins
+  merge for global/ config trees. Prompt text for the judge step lives in the Windmill variable f/memory/intake_judge
   (default body: deploy/windmill/prompts/intake-judge.md).
 
+  '
 schema:
-  $schema: "https://json-schema.org/draft/2020-12/schema"
+  $schema: https://json-schema.org/draft/2020-12/schema
   type: object
   properties:
     synth_model:
       type: string
       default: sonnet
-      description: >
-        claude -p --model value. Windmill variable f/memory/synth_model.
+      description: 'claude -p --model value. Windmill variable f/memory/synth_model.
+
+        '
     intake_judge_prompt:
       type: string
-      default: "$var:f/memory/intake_judge"
-      description: >
-        TODO verify: "$var:path" is Windmill's static-value variable
-        reference syntax (resolved at run time). Confirm on import; if
-        unsupported in the running version, wire an explicit
-        get_variable step instead.
-  required: []
+      default: $var:f/memory/intake_judge
+      description: 'TODO verify: "$var:path" is Windmill''s static-value variable reference syntax (resolved
+        at run time). Confirm on import; if unsupported in the running version, wire an explicit get_variable
+        step instead.
 
+        '
+  required: []
 value:
-  # TODO verify: concurrency_key/concurrent_limit placement — Windmill
-  # exposes per-flow concurrency limits in flow settings; confirm the
-  # exact field names for the installed version. Intent: only one
-  # intake.flow run active at a time.
   concurrent_limit: 1
   concurrency_time_window_s: 0
-
   modules:
-    - id: scan
-      summary: ensure work clone + scan client repos
-      value:
-        type: rawscript
-        language: bash
-        content: |
-          set -euo pipefail
-          [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2; exit 1; }
+  - id: scan
+    summary: ensure work clone + scan client repos
+    value:
+      type: rawscript
+      language: bash
+      content: 'set -euo pipefail
 
-          memoryctl ensure-work --repos-dir /data/repos --work-dir /data/work/canonical
-          memoryctl clients-scan --repos-dir /data/repos
-        input_transforms: {}
+        [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2;
+        exit 1; }
 
-    - id: config_merge
-      summary: mechanical last-writer-wins merge of global/ trees + commit
-      value:
-        type: rawscript
-        language: bash
-        content: |
-          WM_SCAN_JSON="$1"
-          set -euo pipefail
-          [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2; exit 1; }
 
-          printf '%s' "$WM_SCAN_JSON" \
-            | memoryctl config-merge --repos-dir /data/repos --work-dir /data/work/canonical
+        memoryctl ensure-work --repos-dir /data/repos --work-dir /data/work/canonical
 
-          memoryctl commit --work-dir /data/work/canonical \
-            --lock /data/state/canonical.lock \
-            --message "intake: config" \
-            --pathspec global
-        input_transforms:
-          WM_SCAN_JSON:
-            type: javascript
-            expr: results.scan
+        memoryctl clients-scan --repos-dir /data/repos
 
-    - id: project_keys
-      summary: distinct project keys touched by any client's memory candidates
-      value:
-        type: rawscript
-        language: bash
-        content: |
-          WM_SCAN_JSON="$1"
-          set -euo pipefail
-          [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2; exit 1; }
-
-          printf '%s' "$WM_SCAN_JSON" | python3 -c '
-          import json, sys
-          data = json.load(sys.stdin)
-          keys = sorted({
-              m["project"]
-              for c in data.get("clients", [])
-              for m in c.get("memory", [])
-          })
-          print(json.dumps(keys))
-          '
-        input_transforms:
-          WM_SCAN_JSON:
-            type: javascript
-            expr: results.scan
-
-    - id: per_project
-      summary: judge + apply + commit, one project at a time
-      value:
-        type: forloopflow
-        iterator:
+        '
+      input_transforms: {}
+  - id: config_merge
+    summary: mechanical last-writer-wins merge of global/ trees + commit
+    value:
+      type: rawscript
+      language: bash
+      content: "WM_SCAN_JSON=\"$1\"\nset -euo pipefail\n[ -z \"${ANTHROPIC_API_KEY:-}\" ] || { echo \"\
+        ANTHROPIC_API_KEY set — refusing (API credits)\" >&2; exit 1; }\n\nprintf '%s' \"$WM_SCAN_JSON\"\
+        \ \\\n  | memoryctl config-merge --repos-dir /data/repos --work-dir /data/work/canonical\n\nmemoryctl\
+        \ commit --work-dir /data/work/canonical \\\n  --lock /data/state/canonical.lock \\\n  --message\
+        \ \"intake: config\" \\\n  --pathspec global\n"
+      input_transforms:
+        WM_SCAN_JSON:
           type: javascript
-          expr: JSON.parse(results.project_keys)
-        # any single project failure stops the whole flow (skip_failures:
-        # false) — push and marker advancement below are then never
-        # reached, so ALL client markers stay unadvanced and the full
-        # range is retried next run. Coarser than intake.sh's per-client
-        # failed_clients tracking but accepted for v1; see setup.md.
-        skip_failures: false
-        modules:
-          - id: judge_and_apply
-            value:
-              type: rawscript
-              language: bash
-              content: |
-                WM_PROJECT_KEY="$1"
-                WM_SCAN_JSON="$2"
-                WM_INTAKE_JUDGE_PROMPT="$3"
-                WM_MODEL="$4"
-                set -euo pipefail
-                [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2; exit 1; }
+          expr: results.scan
+  - id: project_keys
+    summary: distinct project keys touched by any client's memory candidates
+    value:
+      type: rawscript
+      language: bash
+      content: "WM_SCAN_JSON=\"$1\"\nset -euo pipefail\n[ -z \"${ANTHROPIC_API_KEY:-}\" ] || { echo \"\
+        ANTHROPIC_API_KEY set — refusing (API credits)\" >&2; exit 1; }\n\nprintf '%s' \"$WM_SCAN_JSON\"\
+        \ | python3 -c '\nimport json, sys\ndata = json.load(sys.stdin)\nkeys = sorted({\n    m[\"project\"\
+        ]\n    for c in data.get(\"clients\", [])\n    for m in c.get(\"memory\", [])\n})\nprint(json.dumps(keys))\n\
+        '\n"
+      input_transforms:
+        WM_SCAN_JSON:
+          type: javascript
+          expr: results.scan
+  - id: per_project
+    summary: judge + apply + commit, one project at a time
+    value:
+      type: forloopflow
+      iterator:
+        type: javascript
+        expr: JSON.parse(results.project_keys)
+      skip_failures: false
+      modules:
+      - id: judge_and_apply
+        value:
+          type: rawscript
+          language: bash
+          content: "WM_PROJECT_KEY=\"$1\"\nWM_SCAN_JSON=\"$2\"\nWM_INTAKE_JUDGE_PROMPT=\"$3\"\nWM_MODEL=\"\
+            $4\"\nset -euo pipefail\n[ -z \"${ANTHROPIC_API_KEY:-}\" ] || { echo \"ANTHROPIC_API_KEY set\
+            \ — refusing (API credits)\" >&2; exit 1; }\n\nkey=\"$WM_PROJECT_KEY\"\nmemory_dir=\"/data/work/canonical/projects/$key/memory\"\
+            \n\nctx_file=$(mktemp)\nprompt_file=$(mktemp)\ntrap 'rm -f \"$ctx_file\" \"$prompt_file\"\
+            ' EXIT\n\nprintf '%s' \"$WM_SCAN_JSON\" \\\n  | memoryctl context --repos-dir /data/repos\
+            \ --work-dir /data/work/canonical --project \"$key\" \\\n  > \"$ctx_file\"\n\n{\n  printf\
+            \ '%s\\n\\n' \"$WM_INTAKE_JUDGE_PROMPT\"\n  cat \"$ctx_file\"\n} > \"$prompt_file\"\n\nclaude\
+            \ -p --model \"$WM_MODEL\" < \"$prompt_file\" \\\n  | memoryctl ops-apply --memory-dir \"\
+            $memory_dir\"\n\nmemoryctl commit --work-dir /data/work/canonical \\\n  --lock /data/state/canonical.lock\
+            \ \\\n  --message \"intake: $key\" \\\n  --pathspec \"projects/$key/memory\"\n"
+          input_transforms:
+            WM_PROJECT_KEY:
+              type: javascript
+              expr: flow_input.iter.value
+            WM_SCAN_JSON:
+              type: javascript
+              expr: results.scan
+            WM_INTAKE_JUDGE_PROMPT:
+              type: static
+              value: $var:f/memory/intake_judge
+            WM_MODEL:
+              type: static
+              value: $var:f/memory/synth_model
+  - id: push
+    summary: push everything committed above to canonical.git
+    value:
+      type: rawscript
+      language: bash
+      content: 'set -euo pipefail
 
-                key="$WM_PROJECT_KEY"
-                memory_dir="/data/work/canonical/projects/$key/memory"
+        [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2;
+        exit 1; }
 
-                ctx_file=$(mktemp)
-                prompt_file=$(mktemp)
-                trap 'rm -f "$ctx_file" "$prompt_file"' EXIT
 
-                printf '%s' "$WM_SCAN_JSON" \
-                  | memoryctl context --repos-dir /data/repos --work-dir /data/work/canonical --project "$key" \
-                  > "$ctx_file"
+        memoryctl push --work-dir /data/work/canonical --lock /data/state/canonical.lock
 
-                {
-                  printf '%s\n\n' "$WM_INTAKE_JUDGE_PROMPT"
-                  cat "$ctx_file"
-                } > "$prompt_file"
-
-                claude -p --model "$WM_MODEL" < "$prompt_file" \
-                  | memoryctl ops-apply --memory-dir "$memory_dir"
-
-                memoryctl commit --work-dir /data/work/canonical \
-                  --lock /data/state/canonical.lock \
-                  --message "intake: $key" \
-                  --pathspec "projects/$key/memory"
-              input_transforms:
-                WM_PROJECT_KEY:
-                  type: javascript
-                  expr: flow_input.iter.value
-                WM_SCAN_JSON:
-                  type: javascript
-                  expr: results.scan
-                WM_INTAKE_JUDGE_PROMPT:
-                  type: javascript
-                  expr: flow_input.intake_judge_prompt
-                WM_MODEL:
-                  type: javascript
-                  expr: flow_input.synth_model
-
-    - id: push
-      summary: push everything committed above to canonical.git
-      value:
-        type: rawscript
-        language: bash
-        content: |
-          set -euo pipefail
-          [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2; exit 1; }
-
-          memoryctl push --work-dir /data/work/canonical --lock /data/state/canonical.lock
-        input_transforms: {}
-
-    - id: advance_markers
-      summary: advance refs/intake/last-processed for every scanned client
-      value:
-        type: rawscript
-        language: bash
-        content: |
-          WM_SCAN_JSON="$1"
-          set -euo pipefail
-          [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2; exit 1; }
-
-          printf '%s' "$WM_SCAN_JSON" | python3 -c '
-          import json, sys
-          data = json.load(sys.stdin)
-          for c in data.get("clients", []):
-              print(c["id"] + "\t" + c["head"])
-          ' | while IFS="$(printf '\t')" read -r cid chead; do
-              [ -z "$cid" ] && continue
-              memoryctl markers-advance --repos-dir /data/repos --client "$cid" --to "$chead"
-            done
-        input_transforms:
-          WM_SCAN_JSON:
-            type: javascript
-            expr: results.scan
+        '
+      input_transforms: {}
+  - id: advance_markers
+    summary: advance refs/intake/last-processed for every scanned client
+    value:
+      type: rawscript
+      language: bash
+      content: "WM_SCAN_JSON=\"$1\"\nset -euo pipefail\n[ -z \"${ANTHROPIC_API_KEY:-}\" ] || { echo \"\
+        ANTHROPIC_API_KEY set — refusing (API credits)\" >&2; exit 1; }\n\nprintf '%s' \"$WM_SCAN_JSON\"\
+        \ | python3 -c '\nimport json, sys\ndata = json.load(sys.stdin)\nfor c in data.get(\"clients\"\
+        , []):\n    print(c[\"id\"] + \"\\t\" + c[\"head\"])\n' | while IFS=\"$(printf '\\t')\" read -r\
+        \ cid chead; do\n    [ -z \"$cid\" ] && continue\n    memoryctl markers-advance --repos-dir /data/repos\
+        \ --client \"$cid\" --to \"$chead\"\n  done\n"
+      input_transforms:
+        WM_SCAN_JSON:
+          type: javascript
+          expr: results.scan

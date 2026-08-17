@@ -90,7 +90,10 @@ assert_contains() {
 build_images() {
   docker build -f "$ROOT/build/server.Dockerfile" -t memory-server:e2e "$ROOT"
   docker build -f "$ROOT/build/agent.Dockerfile" -t memory-agent:e2e "$ROOT"
-  docker build -f "$ROOT/build/synthesizer.Dockerfile" -t memory-synthesizer:e2e "$ROOT"
+}
+
+build_memoryctl() {
+  CGO_ENABLED=0 go build -o "$WORKDIR/memoryctl" "$ROOT/cmd/memoryctl"
 }
 
 start_server() {
@@ -104,8 +107,7 @@ start_server() {
 }
 
 wait_for_server() {
-  local i
-  for i in $(seq 1 30); do
+  for _ in $(seq 1 30); do
     if docker exec "$SERVER_NAME" wget -qO- http://localhost:8080/v1/healthz >/dev/null 2>&1; then
       return 0
     fi
@@ -154,23 +156,18 @@ make_fixture_b() {
   chmod -R 777 "$FIXTURE_B"
 }
 
-make_stub_claude() {
-  cat > "$WORKDIR/stub-claude.sh" <<'EOF'
-#!/bin/sh
-cat >/dev/null
-cat <<'STUB'
+make_stub_ops() {
+  cat > "$WORKDIR/stub-ops.txt" <<'EOF'
 ===FILE: merged-entry.md===
 ---
 name: merged-entry
-description: stub merged entry from intake
+description: stub merged entry from the synthesis pipeline
 metadata:
   type: reference
 ---
-Stub merged content produced by the e2e test's claude stub.
+Stub merged content produced by the e2e test's ops stub.
 ===END===
-STUB
 EOF
-  chmod 755 "$WORKDIR/stub-claude.sh"
 }
 
 run_agent() {
@@ -186,16 +183,27 @@ run_agent() {
     memory-agent:e2e
 }
 
-run_intake() {
+run_canonical_update() {
   local logfile="$1"
   docker run --rm \
     -v "$SERVER_DATA_VOL:/data" \
-    -v "$WORKDIR/stub-claude.sh:/usr/local/bin/stub-claude.sh:ro" \
-    -e CLAUDE_CODE_OAUTH_TOKEN=dummy-oauth-token \
-    -e INTAKE_RUN_ONCE=true \
-    -e SYNTH_CLAUDE_BIN=/usr/local/bin/stub-claude.sh \
-    --entrypoint /usr/local/bin/intake-run.sh \
-    memory-synthesizer:e2e > "$logfile" 2>&1
+    -v "$WORKDIR/memoryctl:/usr/local/bin/memoryctl:ro" \
+    -v "$WORKDIR/stub-ops.txt:/stub-ops.txt:ro" \
+    --entrypoint sh \
+    alpine/git -c '
+      set -e
+      git config --global safe.directory "*"
+      git config --global user.email e2e@example.com
+      git config --global user.name e2e
+      memoryctl ensure-work --repos-dir /data/repos --work-dir /data/work/canonical
+      memoryctl ops-apply --memory-dir /data/work/canonical/projects/HOME/memory < /stub-ops.txt
+      memoryctl commit --work-dir /data/work/canonical \
+        --lock /data/state/canonical.lock \
+        --message "synthesize: merged entry (e2e)" \
+        --pathspec projects/HOME
+      memoryctl push --work-dir /data/work/canonical --lock /data/state/canonical.lock
+      echo "canonical update completed"
+    ' > "$logfile" 2>&1
 }
 
 push_disallowed_path() {
@@ -253,49 +261,28 @@ assertions_canonical_push_blocked() {
   assert_false "6: push to canonical.git over http is rejected" push_to_canonical
 }
 
-assertions_after_intake_run1() {
-  local log claude_content memory_tree
-  log="$(cat "$WORKDIR/intake1.log")"
+assertions_after_canonical_update() {
+  local log memory_tree
+  log="$(cat "$WORKDIR/canonical-update.log")"
   echo "$log"
-  assert_contains "7: intake pass 1 completed" "intake pass completed" "$log"
-
-  claude_content="$(git_show canonical.git main global/CLAUDE.md)"
-  assert_eq "7: canonical global/CLAUDE.md mechanically merged from newer client (machine-b)" "$CLAUDE_B" "$claude_content"
-
-  assert_eq "7: canonical global/rules/test-rule.md merged from machine-a" "$RULE_A" "$(git_show canonical.git main global/rules/test-rule.md)"
+  assert_contains "7: canonical update completed" "canonical update completed" "$log"
 
   memory_tree="$(git_ls_tree canonical.git)"
-  assert_contains "7: canonical has intake-produced projects/HOME/memory/merged-entry.md" "projects/HOME/memory/merged-entry.md" "$memory_tree"
+  assert_contains "7: canonical has pipeline-produced projects/HOME/memory/merged-entry.md" "projects/HOME/memory/merged-entry.md" "$memory_tree"
 
   local memory_index
   memory_index="$(git_show canonical.git main projects/HOME/memory/MEMORY.md)"
   assert_contains "7: canonical MEMORY.md rebuilt with merged-entry reference" "merged-entry.md" "$memory_index"
-
-  local marker_a marker_b
-  marker_a="$(git_ref clients/machine-a.git refs/intake/last-processed)"
-  marker_b="$(git_ref clients/machine-b.git refs/intake/last-processed)"
-  assert_true "7: intake marker ref set on machine-a repo" test -n "$marker_a"
-  assert_true "7: intake marker ref set on machine-b repo" test -n "$marker_b"
 }
 
 assertions_after_downsync_a() {
-  assert_true "8: agent A down-synced intake merged-entry.md into local project memory" \
+  assert_true "8: agent A down-synced pipeline merged-entry.md into local project memory" \
     test -f "$FIXTURE_A/projects/$SLUG_A/memory/merged-entry.md"
   assert_contains "8: down-synced merged-entry.md has stub content" \
-    "Stub merged content produced by the e2e test's claude stub." \
+    "Stub merged content produced by the e2e test's ops stub." \
     "$(cat "$FIXTURE_A/projects/$SLUG_A/memory/merged-entry.md" 2>/dev/null || true)"
   assert_eq "8: agent A's own CLAUDE.md is untouched (local wins)" \
     "$CLAUDE_A" "$(head -n1 "$FIXTURE_A/CLAUDE.md")"
-}
-
-assertions_after_intake_run2() {
-  local log
-  log="$(cat "$WORKDIR/intake2.log")"
-  echo "$log"
-  assert_contains "9: second intake pass completed" "intake pass completed" "$log"
-  assert_contains "9: second intake pass is a cheap no-op (no clients processed)" "clients_processed=0" "$log"
-  assert_eq "9: canonical.git head unchanged across cheap-skip intake pass" \
-    "$CANONICAL_HEAD_AFTER_RUN1" "$(git_ref canonical.git refs/heads/main)"
 }
 
 FIXTURE_A="$WORKDIR/fixture-a"
@@ -303,6 +290,7 @@ FIXTURE_B="$WORKDIR/fixture-b"
 
 echo "== 1: build images =="
 build_images
+build_memoryctl
 
 echo "== 2: start server =="
 start_server
@@ -324,19 +312,14 @@ assertions_whitelist_rejection
 echo "== 6: canonical push blocked over http =="
 assertions_canonical_push_blocked
 
-echo "== 7: intake run (first pass) =="
-make_stub_claude
-run_intake "$WORKDIR/intake1.log"
-assertions_after_intake_run1
-CANONICAL_HEAD_AFTER_RUN1="$(git_ref canonical.git refs/heads/main)"
+echo "== 7: canonical update via memoryctl (as the Windmill flows do) =="
+make_stub_ops
+run_canonical_update "$WORKDIR/canonical-update.log"
+assertions_after_canonical_update
 
-echo "== 8: agent A down-sync picks up intake output =="
+echo "== 8: agent A down-sync picks up pipeline output =="
 run_agent machine-a "$FIXTURE_A" "$SLUG_A" "$STATE_VOL_A"
 assertions_after_downsync_a
-
-echo "== 9: intake run (second pass, cheap skip) =="
-run_intake "$WORKDIR/intake2.log"
-assertions_after_intake_run2
 
 echo "----"
 echo "PASS: $PASS FAIL: $FAIL"
