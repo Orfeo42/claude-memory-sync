@@ -166,6 +166,15 @@ dir (see `.docs/11-pipeline-state-db.md`). This relies on the `default`
 worker group having exactly one worker: flow steps then never run in
 parallel, so no step can be mid-write while another syncs the work dir.
 
+The `default` group must not pick up `python3` jobs: the approval app's
+runnables need the admin `PIPELINE_TOKEN` that only the `ui-backend`
+worker holds, and a `default` worker answers them with `403 forbidden`.
+Windmill's stored worker-group config overrides the `WORKER_TAGS` env
+var, so set it there (**Workers** → group `default` → tags, or `POST
+/api/configs/update/worker__default`) to `bash`, `flow`, `dependency`,
+`other`. The `ui-backend` group has no stored config and keeps its env
+tags `python3,dependency`.
+
 ## 9. Approval steps
 
 `daily-synth.flow` (distillation stage) and `taskmine.flow` post
