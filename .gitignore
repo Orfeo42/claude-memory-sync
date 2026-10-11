@@ -3,3 +3,12 @@
 .obsidian/
 .claude/
 **/__pycache__/
+**/*_mock.go
+/server
+/agent
+/memoryctl
+/pipeline
+/cmd/*/server
+/cmd/*/agent
+/cmd/*/memoryctl
+/cmd/*/pipeline

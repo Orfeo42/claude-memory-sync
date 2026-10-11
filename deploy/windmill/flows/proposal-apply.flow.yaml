@@ -1,0 +1,132 @@
+summary: memory-proposal-apply
+description: 'Applies human-approved pipeline-api proposals to the canonical repo, expires stale pending
+  proposals, and cleans up memory entries covered by newly applied skills. Runs to completion; approval happens
+  in the pipeline-api inbox.
+
+  '
+schema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  properties:
+    synth_model:
+      type: string
+      default: sonnet
+      description: claude -p --model value. Windmill variable f/memory/synth_model.
+  required: []
+value:
+  concurrent_limit: 1
+  concurrency_time_window_s: 0
+  modules:
+  - id: ensure_work
+    value:
+      type: rawscript
+      language: bash
+      content: 'set -euo pipefail
+
+        [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2;
+        exit 1; }
+
+
+        memoryctl ensure-work --repos-dir /data/repos --work-dir /data/work/canonical --lock /data/state/canonical.lock
+
+        '
+      input_transforms: {}
+  - id: expire
+    value:
+      type: rawscript
+      language: bash
+      content: 'set -euo pipefail
+
+        [ -z "${ANTHROPIC_API_KEY:-}" ] || { echo "ANTHROPIC_API_KEY set — refusing (API credits)" >&2;
+        exit 1; }
+
+
+        memoryctl proposal expire --older-than 336h --actor proposal-apply
+
+        '
+      input_transforms: {}
+  - id: apply
+    value:
+      type: rawscript
+      language: bash
+      content: "set -euo pipefail\n[ -z \"${ANTHROPIC_API_KEY:-}\" ] || { echo \"ANTHROPIC_API_KEY set\
+        \ — refusing (API credits)\" >&2; exit 1; }\n\nset +e\nout=$(memoryctl proposal apply-approved\
+        \ --work-dir /data/work/canonical --lock /data/state/canonical.lock \\\n  --worker \"proposal-apply:${WM_ROOT_FLOW_JOB_ID:-${WM_FLOW_JOB_ID:-$WM_JOB_ID}}\"\
+        )\nrc=$?\nset -e\n\nprintf '%s' \"$out\" | python3 -c '\nimport json, sys\nresult = json.load(sys.stdin)\n\
+        result[\"exit_code\"] = int(sys.argv[1])\nprint(json.dumps(result))\n' \"$rc\" > ./result.json\
+        \ || { echo \"apply-approved printed no valid JSON (rc=$rc)\" >&2; exit 1; }\ncat ./result.json\n"
+      input_transforms: {}
+  - id: cleanup
+    summary: 'Delete/trim memory entries now covered by the promoted skills. Per promoted skill, the Evidence
+      section''s entry refs are extracted mechanically; per project a claude judge decides delete / trim
+      / keep, applied via ops-apply with --allow-delete.
+
+      '
+    value:
+      type: rawscript
+      language: bash
+      content: "WM_PROMOTED_JSON=\"$1\"\nWM_CLEANUP_PROMPT=\"$2\"\nWM_MODEL=\"$3\"\nset -euo pipefail\n\
+        [ -z \"${ANTHROPIC_API_KEY:-}\" ] || { echo \"ANTHROPIC_API_KEY set — refusing (API credits)\"\
+        \ >&2; exit 1; }\n\nprintf '%s' \"$WM_PROMOTED_JSON\" \\\n  | python3 -c 'import json,sys; [print(t)\
+        \ for t in json.load(sys.stdin)]' > /tmp/promoted-targets\n\ncleaned=0\nwhile IFS= read -r target;\
+        \ do\n  case \"$target\" in global/skills/*/SKILL.md) ;; *) continue ;; esac\n  skill_file=\"\
+        /data/work/canonical/$target\"\n  [ -f \"$skill_file\" ] || continue\n  group=$(printf '%s' \"\
+        $target\" | cut -d/ -f3)\n\n  awk '/^#+[[:space:]]*Evidence/{f=1;next} /^#+[[:space:]]/{f=0} f'\
+        \ \"$skill_file\" \\\n    | grep -oE '[a-z0-9][a-z0-9-]*/[A-Za-z0-9._-]+\\.md' | sort -u > /tmp/evidence-refs\
+        \ || true\n  [ -s /tmp/evidence-refs ] || continue\n\n  for key in $(cut -d/ -f1 /tmp/evidence-refs\
+        \ | sort -u); do\n    memory_dir=\"/data/work/canonical/projects/$key/memory\"\n    [ -d \"$memory_dir\"\
+        \ ] || continue\n\n    prompt_file=$(mktemp)\n    printf '%s\\n\\n=== new skill: %s ===\\n' \"\
+        $WM_CLEANUP_PROMPT\" \"$group\" > \"$prompt_file\"\n    cat \"$skill_file\" >> \"$prompt_file\"\
+        \n    printf '\\n=== candidate entries (project: %s) ===\\n' \"$key\" >> \"$prompt_file\"\n\n\
+        \    found=0\n    while IFS= read -r ref; do\n      [ \"${ref%%/*}\" = \"$key\" ] || continue\n\
+        \      entry=\"$memory_dir/${ref#*/}\"\n      [ -f \"$entry\" ] || continue\n      found=1\n \
+        \     printf '===ENTRY: %s===\\n' \"${ref#*/}\" >> \"$prompt_file\"\n      cat \"$entry\" >> \"\
+        $prompt_file\"\n      printf '\\n' >> \"$prompt_file\"\n    done < /tmp/evidence-refs\n    if\
+        \ [ \"$found\" = 0 ]; then rm -f \"$prompt_file\"; continue; fi\n\n    claude -p --model \"$WM_MODEL\"\
+        \ < \"$prompt_file\" \\\n      | memoryctl ops-apply --allow-delete --memory-dir \"$memory_dir\"\
+        \n    rm -f \"$prompt_file\"\n\n    memoryctl commit --work-dir /data/work/canonical \\\n    \
+        \  --lock /data/state/canonical.lock \\\n      --message \"taskmine: cleanup $key after $group\"\
+        \ \\\n      --pathspec \"projects/$key\"\n    cleaned=1\n  done\ndone < /tmp/promoted-targets\n\
+        rm -f /tmp/promoted-targets /tmp/evidence-refs\n\n[ \"$cleaned\" = 0 ] || memoryctl push --work-dir\
+        \ /data/work/canonical --lock /data/state/canonical.lock\necho \"cleaned=$cleaned\"\n"
+      input_transforms:
+        WM_PROMOTED_JSON:
+          type: javascript
+          expr: JSON.stringify((results.apply?.applied_proposals ?? []).filter(p => p.kind === 'skill').flatMap(p
+            => p.targets))
+        WM_CLEANUP_PROMPT:
+          type: static
+          value: $var:f/memory/taskmine_cleanup
+        WM_MODEL:
+          type: static
+          value: $var:f/memory/synth_model
+  - id: report
+    value:
+      type: rawscript
+      language: bash
+      content: 'WM_APPLY_JSON="$1"
+
+        set -euo pipefail
+
+
+        printf ''%s'' "$WM_APPLY_JSON" | python3 -c ''
+
+        import json, sys
+
+        r = json.load(sys.stdin)
+
+        applied = r.get("applied") or []
+
+        failed = r.get("failed") or []
+
+        print(f"applied={len(applied)} failed={len(failed)}")
+
+        sys.exit(1 if failed or r.get("exit_code", 0) != 0 else 0)
+
+        ''
+
+        '
+      input_transforms:
+        WM_APPLY_JSON:
+          type: javascript
+          expr: JSON.stringify(results.apply)

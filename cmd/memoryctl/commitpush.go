@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"log/slog"
 	"os"
+	"path/filepath"
 	"time"
 
 	"claude-memory-sync/internal/domain"
@@ -45,26 +47,38 @@ func runCommit(ctx context.Context, workDir, lock, message, pathspec string) (bo
 	committed := false
 
 	err := gitutil.WithFileLock(lock, func() error {
-		if err := gitutil.Run(ctx, workDir, "add", "-A", "--", pathspec); err != nil {
-			return domain.Error(err, "git add failed")
-		}
-
-		has, err := gitutil.HasStagedChanges(ctx, workDir)
-		if err != nil {
-			return domain.Error(err, "check staged changes failed")
-		}
-		if !has {
-			return nil
-		}
-
-		if err := commitWithRetry(ctx, workDir, message, pathspec); err != nil {
-			return err
-		}
-		committed = true
-		return nil
+		var err error
+		committed, err = commitPathspec(ctx, workDir, message, pathspec)
+		return err
 	})
 
 	return committed, err
+}
+
+func commitPathspec(ctx context.Context, workDir, message, pathspec string) (bool, error) {
+	if _, err := os.Stat(filepath.Join(workDir, pathspec)); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, domain.Error(err, "stat pathspec failed", slog.String("pathspec", pathspec))
+	}
+
+	if err := gitutil.Run(ctx, workDir, "add", "-A", "--", pathspec); err != nil {
+		return false, domain.Error(err, "git add failed")
+	}
+
+	has, err := gitutil.HasStagedChanges(ctx, workDir)
+	if err != nil {
+		return false, domain.Error(err, "check staged changes failed")
+	}
+	if !has {
+		return false, nil
+	}
+
+	if err := commitWithRetry(ctx, workDir, message, pathspec); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func commitWithRetry(ctx context.Context, workDir, message, pathspec string) error {
@@ -87,11 +101,12 @@ func cmdPush(ctx context.Context, args []string) error {
 		return domain.Error(err, "parse push flags failed")
 	}
 
-	dir := *workDir
-	lockPath := *lock
+	return pushWithLock(ctx, *workDir, *lock)
+}
 
-	return gitutil.WithFileLock(lockPath, func() error {
-		if err := gitutil.Run(ctx, dir, "push", "origin", "main"); err != nil {
+func pushWithLock(ctx context.Context, workDir, lock string) error {
+	return gitutil.WithFileLock(lock, func() error {
+		if err := gitutil.Run(ctx, workDir, "push", "origin", "main"); err != nil {
 			return domain.Error(err, "git push failed")
 		}
 		return nil

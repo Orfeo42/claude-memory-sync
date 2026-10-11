@@ -1,30 +1,39 @@
 import { backend } from "./wmill";
 
-export const listSuspended = (): Promise<unknown> => backend.c({});
+export const listProposals = (): Promise<unknown> => backend.list_proposals({});
 
-export const resumeRun = (jobId: string, approved: string): Promise<unknown> =>
-  backend.d({ job_id: jobId, approved });
+export const getProposal = (proposalId: string): Promise<unknown> =>
+  backend.get_proposal({ proposal_id: proposalId });
 
-export const cancelRun = (jobId: string, reason: string): Promise<unknown> =>
-  backend.b({ job_id: jobId, reason });
+export const decideProposal = (
+  proposalId: string,
+  decision: "approve" | "reject",
+  reason: string,
+): Promise<unknown> =>
+  backend.decide_proposal({
+    proposal_id: proposalId,
+    decision,
+    reason,
+  });
+
+export const retryProposal = (proposalId: string): Promise<unknown> =>
+  backend.retry_proposal({ proposal_id: proposalId });
 
 export const chatProposal = (
-  runId: string,
-  group: string,
+  proposalId: string,
   message: string,
   historyJson: string,
   model: string,
 ): Promise<unknown> =>
-  backend.e({
-    run_id: runId,
-    group,
+  backend.chat_proposal({
+    proposal_id: proposalId,
     message,
     history_json: historyJson,
     model,
   });
 
 export const applyRevision = (
-  runId: string,
-  group: string,
+  proposalId: string,
   reply: string,
-): Promise<unknown> => backend.f({ run_id: runId, group, reply });
+): Promise<unknown> =>
+  backend.apply_revision({ proposal_id: proposalId, reply });

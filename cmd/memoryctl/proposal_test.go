@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"claude-memory-sync/internal/domain"
 )
 
 func TestApplyProposal(t *testing.T) {
@@ -35,7 +37,7 @@ func TestApplyProposal(t *testing.T) {
 		require.NoError(t, os.WriteFile(flattened+".path", []byte("global/../../../etc/passwd"), 0o600))
 
 		err := applyProposal(workDir, flattened)
-		require.Error(t, err)
+		require.ErrorIs(t, err, domain.ErrValidation)
 
 		_, statErr := os.Stat(filepath.Join(workDir, "etc", "passwd"))
 		assert.True(t, os.IsNotExist(statErr))
@@ -66,7 +68,7 @@ func TestApplyProposal(t *testing.T) {
 		require.NoError(t, os.WriteFile(flattened+".path", []byte("projects/foo/memory/MEMORY.md"), 0o600))
 
 		err := applyProposal(workDir, flattened)
-		require.Error(t, err)
+		require.ErrorIs(t, err, domain.ErrValidation)
 	})
 
 	t.Run("disallowed location is rejected", func(t *testing.T) {
@@ -78,6 +80,6 @@ func TestApplyProposal(t *testing.T) {
 		require.NoError(t, os.WriteFile(flattened+".path", []byte("projects/foo/notes/bar.md"), 0o600))
 
 		err := applyProposal(workDir, flattened)
-		require.Error(t, err)
+		require.ErrorIs(t, err, domain.ErrValidation)
 	})
 }

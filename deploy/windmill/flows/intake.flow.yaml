@@ -38,7 +38,7 @@ value:
         exit 1; }
 
 
-        memoryctl ensure-work --repos-dir /data/repos --work-dir /data/work/canonical
+        memoryctl ensure-work --repos-dir /data/repos --work-dir /data/work/canonical --lock /data/state/canonical.lock
 
         memoryctl clients-scan --repos-dir /data/repos
 

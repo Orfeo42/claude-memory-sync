@@ -5,14 +5,15 @@ import (
 	"encoding/json"
 	"flag"
 	"io"
+	"log/slog"
 	"os"
-	pathpkg "path"
 	"path/filepath"
 	"strings"
 
 	"claude-memory-sync/internal/domain"
 	"claude-memory-sync/internal/guardrails"
 	"claude-memory-sync/internal/ops"
+	"claude-memory-sync/internal/pipeline"
 )
 
 const (
@@ -28,23 +29,42 @@ type rejectedOp struct {
 }
 
 type applyResult struct {
-	Applied   []string     `json:"applied"`
-	Deleted   []string     `json:"deleted"`
-	Proposals []string     `json:"proposals"`
-	Rejected  []rejectedOp `json:"rejected"`
-	Nothing   bool         `json:"nothing"`
+	Applied     []string     `json:"applied"`
+	Deleted     []string     `json:"deleted"`
+	Proposals   []string     `json:"proposals"`
+	ProposalIDs []string     `json:"proposal_ids"`
+	Rejected    []rejectedOp `json:"rejected"`
+	Nothing     bool         `json:"nothing"`
 }
 
-func cmdOpsApply(_ context.Context, args []string) error {
+func cmdOpsApply(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("ops-apply", flag.ExitOnError)
 	memoryDir := fs.String("memory-dir", "", "memory directory")
 	allowDelete := fs.Bool("allow-delete", false, "allow delete ops")
 	proposalsDir := fs.String("proposals-dir", "", "proposals directory")
+	sourceFlow := fs.String("source-flow", "", "source flow for API proposals")
+	sourceRun := fs.String("source-run", "", "source run for API proposals")
 	if err := fs.Parse(args); err != nil {
 		return domain.Error(err, "parse ops-apply flags failed")
 	}
 
-	result, err := applyOps(*memoryDir, *allowDelete, *proposalsDir, os.Stdin)
+	var submitter *proposalSubmitter
+	if *sourceFlow != "" || *sourceRun != "" {
+		if *sourceFlow == "" || *sourceRun == "" {
+			return domain.Error(domain.ErrValidation, "source-flow and source-run must be set together")
+		}
+		if *proposalsDir != "" {
+			return domain.Error(domain.ErrValidation, "proposals-dir cannot be combined with source-flow and source-run")
+		}
+
+		pipelineClient, err := newPipelineClient()
+		if err != nil {
+			return err
+		}
+		submitter = &proposalSubmitter{client: pipelineClient, sourceFlow: *sourceFlow, sourceRun: *sourceRun}
+	}
+
+	result, err := applyOps(ctx, *memoryDir, *allowDelete, *proposalsDir, submitter, os.Stdin)
 	if err != nil {
 		return err
 	}
@@ -55,17 +75,18 @@ func cmdOpsApply(_ context.Context, args []string) error {
 	return nil
 }
 
-func applyOps(memoryDir string, allowDelete bool, proposalsDir string, in io.Reader) (applyResult, error) {
+func applyOps(ctx context.Context, memoryDir string, allowDelete bool, proposalsDir string, submitter *proposalSubmitter, in io.Reader) (applyResult, error) {
 	parsed, err := ops.Parse(in)
 	if err != nil {
 		return applyResult{}, domain.Error(err, "parse ops output failed")
 	}
 
 	result := applyResult{
-		Applied:   make([]string, 0, len(parsed.Files)),
-		Deleted:   make([]string, 0, len(parsed.Deletes)),
-		Proposals: make([]string, 0, len(parsed.Proposals)),
-		Rejected:  make([]rejectedOp, 0),
+		Applied:     make([]string, 0, len(parsed.Files)),
+		Deleted:     make([]string, 0, len(parsed.Deletes)),
+		Proposals:   make([]string, 0, len(parsed.Proposals)),
+		ProposalIDs: make([]string, 0, len(parsed.Proposals)),
+		Rejected:    make([]rejectedOp, 0),
 	}
 
 	if parsed.Nothing {
@@ -73,9 +94,22 @@ func applyOps(memoryDir string, allowDelete bool, proposalsDir string, in io.Rea
 		return result, nil
 	}
 
+	if len(parsed.Files) > 0 {
+		if err := os.MkdirAll(memoryDir, 0o750); err != nil {
+			return applyResult{}, domain.Error(err, "create memory dir failed", slog.String("memory_dir", memoryDir))
+		}
+	}
+
 	applyFileOps(memoryDir, parsed.Files, &result)
 	applyDeleteOps(memoryDir, allowDelete, parsed.Deletes, &result)
-	applyProposalOps(proposalsDir, parsed.Proposals, &result)
+
+	if submitter != nil {
+		if err := submitProposalOps(ctx, submitter, parsed.Proposals, &result); err != nil {
+			return applyResult{}, err
+		}
+	} else {
+		applyProposalOps(proposalsDir, parsed.Proposals, &result)
+	}
 
 	if len(result.Applied) > 0 || len(result.Deleted) > 0 {
 		if err := guardrails.RebuildIndex(memoryDir); err != nil {
@@ -84,6 +118,30 @@ func applyOps(memoryDir string, allowDelete bool, proposalsDir string, in io.Rea
 	}
 
 	return result, nil
+}
+
+func submitProposalOps(ctx context.Context, submitter *proposalSubmitter, proposals []ops.FileOp, result *applyResult) error {
+	files := make([]pipeline.File, 0, len(proposals))
+	for _, p := range proposals {
+		if err := pipeline.ValidateTarget(p.Name); err != nil {
+			reject(result, p.Name, reasonInvalidProposalPath)
+			continue
+		}
+		if err := guardrails.ScanSecrets(p.Content); err != nil {
+			reject(result, p.Name, err.Error())
+			continue
+		}
+		files = append(files, pipeline.File{TargetPath: p.Name, Content: string(p.Content)})
+	}
+
+	outcome, err := submitter.submit(ctx, groupFiles(files))
+	if err != nil {
+		return err
+	}
+
+	result.ProposalIDs = append(result.ProposalIDs, outcome.Created...)
+	result.Rejected = append(result.Rejected, outcome.Rejected...)
+	return nil
 }
 
 func reject(result *applyResult, name, reason string) {
@@ -144,7 +202,7 @@ func applyProposalOps(proposalsDir string, proposals []ops.FileOp, result *apply
 			reject(result, p.Name, reasonProposalsNotAllowed)
 			continue
 		}
-		if !validProposalSourcePath(p.Name) {
+		if err := pipeline.ValidateTarget(p.Name); err != nil {
 			reject(result, p.Name, reasonInvalidProposalPath)
 			continue
 		}
@@ -170,14 +228,4 @@ func writeProposalFiles(proposalsDir, flattened string, p ops.FileOp) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(proposalsDir, flattened+".path"), []byte(p.Name), 0o600)
-}
-
-func validProposalSourcePath(p string) bool {
-	if p == "" || strings.Contains(p, "..") || pathpkg.IsAbs(p) {
-		return false
-	}
-	if pathpkg.Clean(p) != p {
-		return false
-	}
-	return strings.HasPrefix(p, "global/") || isProjectMemoryProposal(p)
 }

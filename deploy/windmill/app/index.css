@@ -325,3 +325,9 @@ button.danger {
 .status-text {
   color: var(--success);
 }
+
+.events {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0;
+}

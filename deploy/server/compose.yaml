@@ -45,6 +45,35 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  pipeline-db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: pipeline
+      POSTGRES_DB: pipeline
+      POSTGRES_PASSWORD: ${PIPELINE_DB_PASSWORD:?}
+    volumes:
+      - pipeline-db-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pipeline -d pipeline"]
+    networks:
+      - pipeline-db-net
+    restart: unless-stopped
+
+  pipeline-api:
+    image: ghcr.io/orfeo42/claude-memory-sync-pipeline:latest
+    pull_policy: "always"
+    environment:
+      PIPELINE_DATABASE_URL: postgres://pipeline:${PIPELINE_DB_PASSWORD:?}@pipeline-db:5432/pipeline?sslmode=disable
+      PIPELINE_TOKEN: ${PIPELINE_TOKEN:?}
+      PIPELINE_ADMIN_TOKEN: ${PIPELINE_ADMIN_TOKEN:?}
+    networks:
+      - pipeline-db-net
+      - pipeline
+    depends_on:
+      pipeline-db:
+        condition: service_healthy
+    restart: unless-stopped
+
   windmill-worker-llm-steps:
     image: ghcr.io/orfeo42/claude-memory-sync-windmill-worker:latest
     pull_policy: "always"
@@ -54,13 +83,20 @@ services:
       MODE: worker
       WORKER_GROUP: default
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:?}
-      WHITELIST_ENVS: CLAUDE_CODE_OAUTH_TOKEN
+      PIPELINE_URL: http://pipeline-api:8090
+      PIPELINE_TOKEN: ${PIPELINE_TOKEN:?}
+      WHITELIST_ENVS: CLAUDE_CODE_OAUTH_TOKEN,PIPELINE_URL,PIPELINE_TOKEN
+    networks:
+      - default
+      - pipeline
     volumes:
       - memory-data:/data
     depends_on:
       windmill-db:
         condition: service_healthy
       windmill-server:
+        condition: service_started
+      pipeline-api:
         condition: service_started
     restart: unless-stopped
 
@@ -74,7 +110,12 @@ services:
       WORKER_GROUP: ui-backend
       WORKER_TAGS: python3,dependency
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:?}
-      WHITELIST_ENVS: CLAUDE_CODE_OAUTH_TOKEN
+      PIPELINE_URL: http://pipeline-api:8090
+      PIPELINE_TOKEN: ${PIPELINE_ADMIN_TOKEN:?}
+      WHITELIST_ENVS: CLAUDE_CODE_OAUTH_TOKEN,PIPELINE_URL,PIPELINE_TOKEN
+    networks:
+      - default
+      - pipeline
     volumes:
       - memory-data:/data
     depends_on:
@@ -82,8 +123,17 @@ services:
         condition: service_healthy
       windmill-server:
         condition: service_started
+      pipeline-api:
+        condition: service_started
     restart: unless-stopped
+
+networks:
+  pipeline-db-net:
+    internal: true
+  pipeline:
+    internal: true
 
 volumes:
   memory-data:
   windmill-db-data:
+  pipeline-db-data:

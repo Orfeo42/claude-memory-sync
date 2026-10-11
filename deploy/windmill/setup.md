@@ -119,22 +119,30 @@ current value visible without opening a flow run):
 ## 6. Import the flows
 
 For each of `flows/intake.flow.yaml`, `flows/daily-synth.flow.yaml`,
-`flows/taskmine.flow.yaml`: **Flows** → **New flow** → **Import from
-YAML**, paste the file, then work through whatever the editor flags per
-the caveat in the section above. Save each as its own flow (path
-suggestion: `f/memory/intake`, `f/memory/daily_synth`,
-`f/memory/taskmine`).
+`flows/taskmine.flow.yaml`, `flows/proposal-apply.flow.yaml`: **Flows**
+→ **New flow** (or open the existing one) → **Import from YAML**, paste
+the file, then work through whatever the editor flags per the caveat in
+the section above. Live paths: `u/luciorosadini87/memory_intake`,
+`u/luciorosadini87/memory_daily_synth`,
+`u/luciorosadini87/memory_taskmine`,
+`u/luciorosadini87/memory_proposal_apply` — the approval app starts the
+last one by that exact path.
 
 ## 7. Schedules
 
 Each flow gets its own schedule, attached from the flow's **Triggers** →
 **Schedule** tab:
 
-| Flow               | Cron           | Interval              |
-| ------------------ | -------------- | --------------------- |
-| `intake.flow`      | `*/45 * * * *` | 45 minutes            |
-| `daily-synth.flow` | `0 3 * * *`    | daily (03:00)         |
-| `taskmine.flow`    | `0 4 * * 0`    | weekly (Sunday 04:00) |
+| Flow                  | Cron (6-field, seconds first) | Interval              |
+| --------------------- | ----------------------------- | --------------------- |
+| `intake.flow`         | `0 */45 * * * *`              | 45 minutes            |
+| `daily-synth.flow`    | `0 0 3 * * *`                 | daily (03:00)         |
+| `taskmine.flow`       | `0 0 4 * * 7`                 | weekly (Sunday 04:00) |
+| `proposal-apply.flow` | `0 */10 * * * *`              | 10 minutes            |
+
+Set `no_flow_overlap: true` on every schedule. This instance's cron
+parser takes a leading seconds field and rejects Sunday as `0` (use
+`7`).
 
 Pick times that don't overlap on a small Raspberry Pi worker — the
 suggested offsets above stagger daily-synth and taskmine an hour apart
@@ -149,56 +157,63 @@ actually reads; if not, set the equivalent limit from the flow's
 the shell pipeline's `flock` on `/data/state/canonical.lock`: never let
 two runs of the same flow execute at once. Cross-flow concurrency
 (intake running while daily-synth runs) is not restricted the same way —
-`memoryctl commit`/`push` take the lock argument
-(`/data/state/canonical.lock`) precisely so concurrent flows still
-serialize their actual canonical writes even if Windmill lets both flows
-be "running" simultaneously.
+`memoryctl ensure-work`/`commit`/`push`/`proposal apply-approved` take
+the lock argument (`/data/state/canonical.lock`) precisely so
+concurrent flows still serialize their actual canonical writes even if
+Windmill lets both flows be "running" simultaneously. `ensure-work`
+never resets away unpushed commits another flow left in the shared work
+dir (see `.docs/11-pipeline-state-db.md`). This relies on the `default`
+worker group having exactly one worker: flow steps then never run in
+parallel, so no step can be mid-write while another syncs the work dir.
 
 ## 9. Approval steps
 
-`daily-synth.flow` (distillation stage) and `taskmine.flow` both stage
-proposals under `/tmp/proposals` inside the worker container rather than
-applying them directly — anything destined for `global/rules/**`,
-`global/CLAUDE.md`, or `global/skills/**` is proposal-only, never
-auto-applied (same rule as the original condense-pass design in
-`.docs/03-condense-dedup.md`: rule/skill generation stays
-pre-approval-gated).
+`daily-synth.flow` (distillation stage) and `taskmine.flow` post
+proposals to `pipeline-api` (`memoryctl ops-apply --source-flow
+--source-run`) instead of applying them — anything destined for
+`global/rules/**`, `global/CLAUDE.md`, or `global/skills/**` is
+proposal-only, never auto-applied (same rule as the original
+condense-pass design in `.docs/03-condense-dedup.md`). Both flows then
+finish normally: no run ever suspends, and canceling or deleting runs
+can no longer lose a pending proposal. Design and status machine:
+`.docs/11-pipeline-state-db.md`.
 
-When proposals are staged, the flow run **suspends** at the approval
-step (visible in the Windmill UI as a paused run, distinct from
-running/success/failure). Open the run detail page: the step's output
-lists every staged proposal grouped by name (skill directory name for
-`global/skills/**`, target basename otherwise) with full content.
-Resolving it:
+Resolve proposals in the approval inbox app (`app/APP.md`), one by one:
 
-- **Resume** — the resume form has one field, `approved`: `all`
-  (default) promotes every group, `none` promotes nothing, or a
-  comma-separated list of group names promotes exactly those. Files not
-  approved are deleted from staging; nothing needs manual cleanup on
-  the worker container.
-- **Cancel** the run — discards the batch; nothing gets promoted, and
-  the next run wipes `/tmp/proposals` at its first step anyway.
+- **Approve** — moves it to `approved` and starts
+  `memory_proposal_apply`, which claims it, writes and commits it under
+  the canonical lock (`proposal: apply <kind> <name>`), pushes, and only
+  then marks it `applied` with the commit sha. A push failure marks it
+  `failed`; **Retry** in the app re-queues it.
+- **Reject** — moves it to `rejected` and records `(kind, name)` as a
+  rejection; taskmine's draft prompt receives every rejection as a
+  do-not-re-propose list, plus the names of proposals still pending or
+  approved and the inventory of skills already in `global/skills/`.
+- Pending proposals older than 14 days expire automatically
+  (`proposal-apply`'s first step).
 
-Promoted proposals are applied via `memoryctl proposal-apply`, one
-commit each (`distill: promote <name>` / `taskmine: <name>`), then
-pushed to `canonical.git` alongside everything else the run already
-committed.
+After an applied **skill**, `proposal-apply`'s cleanup step runs the
+former taskmine post-promotion cleanup: the entry refs in the skill's
+Evidence section (`<project-key>/<file>.md`) are extracted mechanically,
+and per project a claude judge decides for each cited entry whether it
+is now fully covered by the skill (delete), partially covered (trim,
+with a pointer to the skill), or independently valuable (keep). Applied
+via `ops-apply --allow-delete`, one commit per project
+(`taskmine: cleanup <key> after <name>`).
 
-Taskmine additionally learns from the decision, both ways:
+### One-time migration from the suspend-based approvals
 
-- **Approved** — a cleanup step runs after promotion: for each promoted
-  skill, the entry refs in its Evidence section
-  (`<project-key>/<file>.md`) are extracted mechanically, and per
-  project a claude judge decides for each cited entry whether it is now
-  fully covered by the skill (delete), partially covered (trim, with a
-  pointer to the skill), or independently valuable (keep). Applied via
-  `ops-apply --allow-delete`, one commit per project
-  (`taskmine: cleanup <key> after <name>`).
-- **Rejected** — the rejected group names accumulate in
-  `/data/state/taskmine-rejected` (on the server volume) and are fed
-  into the next draft prompt as a do-not-re-propose list. The draft
-  prompt also receives the inventory of skills already in
-  `global/skills/` so promoted proposals don't come back either.
+Inside `windmill-worker-ui-backend` (it holds the admin token):
+
+```sh
+for d in /data/state/proposals/*/; do
+  memoryctl proposal import --dir "$d" --source-flow legacy-import
+done
+memoryctl proposal import-rejections --file /data/state/taskmine-rejected --actor legacy-import
+```
+
+After one clean `proposal-apply` cycle, delete `/data/state/proposals/`
+and `/data/state/taskmine-rejected`.
 
 ## 10. Known v1 simplifications (carried over from the implementation brief)
 
@@ -231,5 +246,6 @@ input form with its schema defaults) with a small/test canonical repo
 before trusting the schedules. Confirm: the `ANTHROPIC_API_KEY` guard
 actually blocks a step when the var is set (test deliberately once);
 `memoryctl push` lands commits visible via `git log` on
-`/data/repos/canonical.git`; the approval suspend/resume round-trip
-works end to end for at least one real proposal.
+`/data/repos/canonical.git`; one real proposal goes pending → approved
+→ applied through the app, with its commit sha visible in the app's
+event history and in `git log` on canonical.

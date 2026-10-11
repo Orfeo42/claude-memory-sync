@@ -1,6 +1,6 @@
 summary: memory-daily-synth
 description: 'Per-project condense/dedup (+ optional staleness deletion), cross-project distillation with
-  human-approved proposals, and hot-cache digest regeneration. Prompt text lives in Windmill variables
+  proposals posted to pipeline-api for human approval, and hot-cache digest regeneration. Prompt text lives in Windmill variables
   — see deploy/windmill/setup.md for the full variable list.
 
   '
@@ -58,17 +58,7 @@ value:
         exit 1; }
 
 
-        memoryctl ensure-work --repos-dir /data/repos --work-dir /data/work/canonical
-
-        mkdir -p /data/state/proposals
-
-        find /data/state/proposals -mindepth 1 -maxdepth 1 -type d -mtime +14 -exec rm -rf {} +
-
-        staging="/data/state/proposals/${WM_ROOT_FLOW_JOB_ID:-${WM_FLOW_JOB_ID:-$WM_JOB_ID}}"
-
-        rm -rf "$staging"
-
-        mkdir -p "$staging"
+        memoryctl ensure-work --repos-dir /data/repos --work-dir /data/work/canonical --lock /data/state/canonical.lock
 
         '
       input_transforms: {}
@@ -245,9 +235,9 @@ value:
             \ \"$proj\" ] && continue\n    printf -- '--- %s/%s ---\\n' \"$proj\" \"$file\"\n    memoryctl\
             \ corpus read --work-dir /data/work/canonical --project \"$proj\" --file \"$file\"\n    printf\
             \ '\\n'\n  done >> \"$prompt_file\"\n\nclaude -p --model \"$WM_MODEL\" < \"$prompt_file\"\
-            \ \\\n  | memoryctl ops-apply --allow-delete --memory-dir \"$memory_dir\" --proposals-dir\
-            \ \"/data/state/proposals/${WM_ROOT_FLOW_JOB_ID:-${WM_FLOW_JOB_ID:-$WM_JOB_ID}}\"\n\nmemoryctl\
-            \ commit --work-dir /data/work/canonical \\\n  --lock /data/state/canonical.lock \\\n  --message\
+            \ \\\n  | memoryctl ops-apply --allow-delete --memory-dir \"$memory_dir\" --source-flow daily-synth\
+            \ --source-run \"${WM_ROOT_FLOW_JOB_ID:-${WM_FLOW_JOB_ID:-$WM_JOB_ID}}\"\n\nmemoryctl commit\
+            \ --work-dir /data/work/canonical \\\n  --lock /data/state/canonical.lock \\\n  --message\
             \ \"distill: $title\" \\\n  --pathspec \"projects/$target_project/memory\"\n"
           input_transforms:
             WM_CLUSTER_JSON:
@@ -259,84 +249,6 @@ value:
             WM_MODEL:
               type: static
               value: $var:f/memory/synth_model
-  - id: check_proposals
-    summary: any distill proposals staged in /tmp/proposals?
-    value:
-      type: rawscript
-      language: bash
-      content: "set -euo pipefail\nstaging=\"/data/state/proposals/${WM_ROOT_FLOW_JOB_ID:-${WM_FLOW_JOB_ID:-$WM_JOB_ID}}\"\
-        \nif find \"$staging\" -type f 2>/dev/null | grep -q .; then\n  echo true\nelse\n  rm -rf \"$staging\"\
-        \n  echo false\nfi\n"
-      input_transforms: {}
-  - id: promote_if_approved
-    value:
-      type: branchone
-      branches:
-      - summary: proposals staged — ask for approval, then promote
-        expr: results.check_proposals === 'true'
-        modules:
-        - id: distill_approval
-          summary: 'Approval gate. Output groups staged proposals by name. On Resume, fill the form field
-            "approved" with "all", "none", or a comma-separated list of the group names to promote — only
-            those are promoted, the rest are deleted.
-
-            '
-          value:
-            type: rawscript
-            language: bash
-            content: "set -euo pipefail\nstaging=\"/data/state/proposals/${WM_ROOT_FLOW_JOB_ID:-${WM_FLOW_JOB_ID:-$WM_JOB_ID}}\"\
-              \npython3 - \"$staging\" <<'EOF' > ./result.json\nimport json, pathlib, sys\nstaging = pathlib.Path(sys.argv[1])\n\
-              groups = {}\nfor f in sorted(staging.iterdir()):\n    if f.name.endswith(\".path\") or not\
-              \ f.is_file():\n        continue\n    target = (staging / (f.name + \".path\")).read_text().strip()\n\
-              \    parts = target.split(\"/\")\n    group = parts[2] if target.startswith(\"global/skills/\"\
-              ) and len(parts) > 2 else parts[-1]\n    groups.setdefault(group, []).append({\"target\"\
-              : target, \"content\": f.read_text()})\nmd = [\"# Staged proposals\\n\"]\nmd.append(\"On\
-              \ **Resume**, set `approved` to `all`, `none`, or comma-separated group names.\\n\")\nfor\
-              \ group, files in groups.items():\n    md.append(f\"## {group}\\n\")\n    for entry in files:\n\
-              \        md.append(f\"target: `{entry['target']}`\\n\")\n        md.append(\"````markdown\\\
-              n\" + entry[\"content\"] + \"\\n````\\n\")\nprint(json.dumps({\n    \"markdown\": \"\\n\"\
-              .join(md),\n    \"groups\": [{\"name\": g, \"files\": fs} for g, fs in groups.items()],\n\
-              }))\nEOF\n"
-            input_transforms: {}
-          suspend:
-            required_events: 1
-            timeout: 604800
-            resume_form:
-              schema:
-                type: object
-                properties:
-                  approved:
-                    type: string
-                    default: all
-                    description: 'all | none | comma-separated group names to promote
-
-                      '
-        - id: distill_promote
-          value:
-            type: rawscript
-            language: bash
-            content: "WM_APPROVED=\"$1\"\nset -euo pipefail\n[ -z \"${ANTHROPIC_API_KEY:-}\" ] || { echo\
-              \ \"ANTHROPIC_API_KEY set — refusing (API credits)\" >&2; exit 1; }\n\nstaging=\"/data/state/proposals/${WM_ROOT_FLOW_JOB_ID:-${WM_FLOW_JOB_ID:-$WM_JOB_ID}}\"\
-              \napproved=$(printf '%s' \"$WM_APPROVED\" | tr -d ' ')\nrm -f /tmp/promote-promoted /tmp/promote-discarded\n\
-              for f in \"$staging\"/*; do\n  case \"$f\" in *.path) continue ;; esac\n  target=$(cat \"\
-              $f.path\")\n  case \"$target\" in\n    global/skills/*) group=$(printf '%s' \"$target\"\
-              \ | cut -d/ -f3) ;;\n    *) group=$(basename \"$target\") ;;\n  esac\n  case \"$target\"\
-              \ in\n    projects/*) pathspec=\"projects/$(printf '%s' \"$target\" | cut -d/ -f2)\" ;;\n\
-              \    *) pathspec=global ;;\n  esac\n  if [ \"$approved\" = \"all\" ] || printf ',%s,' \"\
-              $approved\" | grep -q \",$group,\"; then\n    memoryctl proposal-apply --work-dir /data/work/canonical\
-              \ --file \"$f\"\n    memoryctl commit --work-dir /data/work/canonical \\\n      --lock /data/state/canonical.lock\
-              \ \\\n      --message \"distill: promote $group\" \\\n      --pathspec \"$pathspec\"\n \
-              \   printf '%s\\n' \"$target\" >> /tmp/promote-promoted\n  else\n    printf '%s\\n' \"$target\"\
-              \ >> /tmp/promote-discarded\n  fi\n  rm -f \"$f\" \"$f.path\"\ndone\n\npython3 - <<'EOF'\
-              \ > ./result.json\nimport json, pathlib\ndef lines(p):\n    f = pathlib.Path(p)\n    return\
-              \ f.read_text().splitlines() if f.exists() else []\nprint(json.dumps({\"promoted\": lines(\"\
-              /tmp/promote-promoted\"), \"discarded\": lines(\"/tmp/promote-discarded\")}))\nEOF\nrm -f\
-              \ /tmp/promote-promoted /tmp/promote-discarded\nrm -rf \"$staging\"\n"
-            input_transforms:
-              WM_APPROVED:
-                type: javascript
-                expr: resume?.approved ?? 'all'
-      default: []
   - id: hotcache
     summary: regenerate the hot-cache digest for every project
     value:

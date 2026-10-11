@@ -5,8 +5,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -46,7 +48,26 @@ func HasStagedChanges(ctx context.Context, dir string) (bool, error) {
 	return false, fmt.Errorf("git diff --cached: %w", err)
 }
 
+func IsAncestor(ctx context.Context, dir, ancestor, descendant string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "merge-base", "--is-ancestor", ancestor, descendant)
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+
+	return false, fmt.Errorf("git merge-base --is-ancestor: %w", err)
+}
+
 func WithFileLock(path string, fn func() error) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		return domain.Error(err, "create lock dir failed", slog.String("path", path))
+	}
+
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return domain.Error(err, "open lock file failed")

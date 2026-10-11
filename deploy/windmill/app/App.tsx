@@ -1,60 +1,56 @@
 import * as React from "react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
 import {
   applyRevision,
-  cancelRun,
   chatProposal,
-  listSuspended,
-  resumeRun,
+  decideProposal,
+  getProposal,
+  listProposals,
+  retryProposal,
 } from "./backendApi";
-import { RunDetail } from "./RunDetail";
-import { RunList } from "./RunList";
+import { ProposalDetail } from "./ProposalDetail";
+import { ProposalList } from "./ProposalList";
 import {
   errorMessage,
-  groupByRun,
-  isProposalItem,
+  isDecideResult,
+  isProposal,
+  isProposalDetail,
   isReplyPayload,
   isRevisionPayload,
-  itemKey,
 } from "./types";
-import type { ChatMessage, Decision, Model, ProposalItem } from "./types";
+import type {
+  ChatMessage,
+  Model,
+  Proposal,
+  ProposalDetail as Detail,
+} from "./types";
+
+const applyStatus = (applyJobId: string | null, verb: string): string =>
+  applyJobId === null
+    ? `Proposal ${verb}`
+    : `Proposal ${verb}, apply job ${applyJobId} started`;
 
 export const App = (): JSX.Element => {
-  const [items, setItems] = useState<readonly ProposalItem[]>([]);
-  const [decisions, setDecisions] = useState<
-    Readonly<Record<string, Decision>>
-  >({});
+  const [proposals, setProposals] = useState<readonly Proposal[]>([]);
+  const [detail, setDetail] = useState<Detail | null>(null);
   const [chats, setChats] = useState<
     Readonly<Record<string, readonly ChatMessage[]>>
   >({});
   const [model, setModel] = useState<Model>("sonnet");
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [chatBusy, setChatBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const nextMessageId = useRef(1);
 
   const refresh = useCallback(async (): Promise<void> => {
     setBusy(true);
     setError(null);
     try {
-      const result: unknown = await listSuspended();
-      const rows = Array.isArray(result) ? result.filter(isProposalItem) : [];
-      setItems(rows);
-      const validKeys = new Set(rows.map(itemKey));
-      setSelectedKey((current) =>
-        current !== null && validKeys.has(current) ? current : null,
-      );
-      setDecisions((current) => {
-        const kept: Record<string, Decision> = {};
-        for (const [key, decision] of Object.entries(current)) {
-          if (validKeys.has(key)) {
-            kept[key] = decision;
-          }
-        }
-        return kept;
-      });
+      const result: unknown = await listProposals();
+      setProposals(Array.isArray(result) ? result.filter(isProposal) : []);
     } catch (loadError: unknown) {
       setError(errorMessage(loadError));
     } finally {
@@ -66,88 +62,112 @@ export const App = (): JSX.Element => {
     void refresh();
   }, [refresh]);
 
-  const decide = useCallback(
-    (decision: Decision): void => {
-      if (selectedKey === null) {
-        return;
+  const select = useCallback(async (id: string): Promise<void> => {
+    setSelectedId(id);
+    setDetail(null);
+    setError(null);
+    try {
+      const result: unknown = await getProposal(id);
+      if (!isProposalDetail(result)) {
+        throw new Error("unexpected proposal payload");
       }
-      setDecisions((current) => ({ ...current, [selectedKey]: decision }));
-    },
-    [selectedKey],
-  );
+      setDetail(result);
+    } catch (selectError: unknown) {
+      setError(errorMessage(selectError));
+    }
+  }, []);
 
-  const submit = useCallback(
-    async (runId: string): Promise<void> => {
-      const runItems = items.filter((item) => item.run_id === runId);
-      const approvedNames = runItems
-        .filter((item) => decisions[itemKey(item)] === "approved")
-        .map((item) => item.group);
-      const approved =
-        approvedNames.length > 0 ? approvedNames.join(",") : "none";
-      setBusy(true);
-      setError(null);
-      try {
-        await resumeRun(runId, approved);
-        setStatus(`Submitted: approved=${approved}`);
-        await refresh();
-      } catch (submitError: unknown) {
-        setError(errorMessage(submitError));
-        setBusy(false);
-      }
-    },
-    [items, decisions, refresh],
-  );
-
-  const cancel = useCallback(
-    async (runId: string): Promise<void> => {
-      if (!window.confirm("Cancel this run and discard its whole batch?")) {
-        return;
-      }
-      setBusy(true);
-      setError(null);
-      try {
-        await cancelRun(runId, "rejected from approval inbox");
-        setStatus("Run canceled, batch discarded");
-        await refresh();
-      } catch (cancelError: unknown) {
-        setError(errorMessage(cancelError));
-        setBusy(false);
-      }
+  const finishDecision = useCallback(
+    async (message: string): Promise<void> => {
+      setSelectedId(null);
+      setDetail(null);
+      await refresh();
+      setStatus(message);
     },
     [refresh],
   );
 
-  const selected = items.find((item) => itemKey(item) === selectedKey) ?? null;
-  const selectedChat = selectedKey === null ? [] : (chats[selectedKey] ?? []);
+  const decide = useCallback(
+    async (
+      id: string,
+      decision: "approve" | "reject",
+      reason: string,
+    ): Promise<void> => {
+      setBusy(true);
+      setError(null);
+      try {
+        const result: unknown = await decideProposal(id, decision, reason);
+        if (!isDecideResult(result)) {
+          throw new Error("unexpected decision payload");
+        }
+        await finishDecision(
+          applyStatus(
+            result.apply_job_id ?? null,
+            decision === "approve" ? "approved" : "rejected",
+          ),
+        );
+      } catch (decideError: unknown) {
+        setError(errorMessage(decideError));
+        setBusy(false);
+      }
+    },
+    [finishDecision],
+  );
+
+  const retry = useCallback(
+    async (id: string): Promise<void> => {
+      setBusy(true);
+      setError(null);
+      try {
+        const result: unknown = await retryProposal(id);
+        if (!isDecideResult(result)) {
+          throw new Error("unexpected retry payload");
+        }
+        await finishDecision(
+          applyStatus(result.apply_job_id ?? null, "retried"),
+        );
+      } catch (retryError: unknown) {
+        setError(errorMessage(retryError));
+        setBusy(false);
+      }
+    },
+    [finishDecision],
+  );
 
   const send = useCallback(
     async (message: string): Promise<void> => {
-      if (selected === null || selectedKey === null) {
+      if (selectedId === null) {
         return;
       }
-      const history = chats[selectedKey] ?? [];
+      const history = chats[selectedId] ?? [];
+      const userId = nextMessageId.current++;
       setChats((current) => ({
         ...current,
-        [selectedKey]: [...history, { role: "user", content: message }],
+        [selectedId]: [
+          ...history,
+          { id: userId, role: "user", content: message },
+        ],
       }));
       setChatBusy(true);
       setError(null);
       try {
         const result: unknown = await chatProposal(
-          selected.run_id,
-          selected.group,
+          selectedId,
           message,
-          JSON.stringify(history),
+          JSON.stringify(
+            history.map(({ role, content }) => ({ role, content })),
+          ),
           model,
         );
         if (!isReplyPayload(result)) {
           throw new Error("unexpected chat reply payload");
         }
+        const replyId = nextMessageId.current++;
         setChats((current) => ({
           ...current,
-          [selectedKey]: [
-            ...(current[selectedKey] ?? []),
-            { role: "assistant", content: result.reply },
+          [selectedId]: [
+            ...(current[selectedId] ?? []),
+            { id: replyId, role: "assistant", content: result.reply },
           ],
         }));
       } catch (chatError: unknown) {
@@ -156,14 +176,14 @@ export const App = (): JSX.Element => {
         setChatBusy(false);
       }
     },
-    [selected, selectedKey, chats, model],
+    [selectedId, chats, model],
   );
 
   const apply = useCallback(async (): Promise<void> => {
-    if (selected === null || selectedKey === null) {
+    if (selectedId === null) {
       return;
     }
-    const lastAssistant = [...(chats[selectedKey] ?? [])]
+    const lastAssistant = [...(chats[selectedId] ?? [])]
       .reverse()
       .find((m) => m.role === "assistant");
     if (lastAssistant === undefined) {
@@ -173,19 +193,18 @@ export const App = (): JSX.Element => {
     setError(null);
     try {
       const result: unknown = await applyRevision(
-        selected.run_id,
-        selected.group,
+        selectedId,
         lastAssistant.content,
       );
       if (!isRevisionPayload(result)) {
         throw new Error("unexpected revision payload");
       }
-      setItems((current) =>
-        current.map((item) =>
-          itemKey(item) === selectedKey
-            ? { ...item, content: result.content }
-            : item,
-        ),
+      const revised = result.proposal;
+      setDetail((current) =>
+        current === null ? current : { ...current, proposal: revised },
+      );
+      setProposals((current) =>
+        current.map((p) => (p.id === revised.id ? revised : p)),
       );
       setStatus(`Revision applied to ${String(result.applied.length)} file(s)`);
     } catch (applyError: unknown) {
@@ -193,44 +212,81 @@ export const App = (): JSX.Element => {
     } finally {
       setChatBusy(false);
     }
-  }, [selected, selectedKey, chats]);
+  }, [selectedId, chats]);
+
+  const pending = proposals.filter((p) => p.status === "pending");
+  const failed = proposals.filter((p) => p.status === "failed");
+  const inProgress = proposals.filter(
+    (p) => p.status === "approved" || p.status === "applying",
+  );
+  const selectedChat = selectedId === null ? [] : (chats[selectedId] ?? []);
+
+  const onSelect = useCallback(
+    (id: string): void => {
+      void select(id);
+    },
+    [select],
+  );
+  const onRefresh = useCallback((): void => {
+    void refresh();
+  }, [refresh]);
+  const onApprove = useCallback(
+    (reason: string): void => {
+      if (selectedId !== null) {
+        void decide(selectedId, "approve", reason);
+      }
+    },
+    [selectedId, decide],
+  );
+  const onReject = useCallback(
+    (reason: string): void => {
+      if (selectedId !== null) {
+        void decide(selectedId, "reject", reason);
+      }
+    },
+    [selectedId, decide],
+  );
+  const onRetry = useCallback((): void => {
+    if (selectedId !== null) {
+      void retry(selectedId);
+    }
+  }, [selectedId, retry]);
+  const onSend = useCallback(
+    (message: string): void => {
+      void send(message);
+    },
+    [send],
+  );
+  const onApplyRevision = useCallback((): void => {
+    void apply();
+  }, [apply]);
 
   return (
     <div className="page">
-      <RunList
-        runs={groupByRun(items)}
-        decisions={decisions}
-        selectedKey={selectedKey}
+      <ProposalList
+        pending={pending}
+        failed={failed}
+        inProgress={inProgress}
+        selectedId={selectedId}
         busy={busy}
         error={error}
         status={status}
-        onSelect={setSelectedKey}
-        onRefresh={() => {
-          void refresh();
-        }}
-        onSubmit={(runId) => {
-          void submit(runId);
-        }}
-        onCancelRun={(runId) => {
-          void cancel(runId);
-        }}
+        onSelect={onSelect}
+        onRefresh={onRefresh}
       />
-      <RunDetail
-        key={selectedKey ?? "none"}
-        item={selected}
-        decision={selected === null ? undefined : decisions[itemKey(selected)]}
+      <ProposalDetail
+        key={selectedId ?? "none"}
+        detail={detail}
         busy={busy}
         chat={selectedChat}
         chatBusy={chatBusy}
         model={model}
-        onDecide={decide}
+        onApprove={onApprove}
+        onReject={onReject}
+        onRetry={onRetry}
         onModelChange={setModel}
-        onSend={(message) => {
-          void send(message);
-        }}
-        onApplyRevision={() => {
-          void apply();
-        }}
+        onSend={onSend}
+        onApplyRevision={onApplyRevision}
       />
     </div>
   );

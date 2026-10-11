@@ -4,27 +4,15 @@ import (
 	"context"
 	"flag"
 	"os"
-	pathpkg "path"
 	"path/filepath"
 	"strings"
 
 	"claude-memory-sync/internal/domain"
 	"claude-memory-sync/internal/guardrails"
+	"claude-memory-sync/internal/pipeline"
 )
 
-const (
-	proposalRulesPrefix  = "global/rules/"
-	proposalSkillsPrefix = "global/skills/"
-	proposalAgentsPrefix = "global/agents/"
-	proposalClaudeMDPath = "global/CLAUDE.md"
-)
-
-const (
-	errEmptyProposalPath      cliError = "proposal path is empty"
-	errProposalPathTraversal  cliError = "proposal path is unsafe"
-	errProposalPathNotAllowed cliError = "proposal path is not in an allowed location"
-	errProposalRequiresMD     cliError = "proposal path requires .md extension"
-)
+const errProposalPathTraversal cliError = "proposal path is unsafe"
 
 func cmdProposalApply(_ context.Context, args []string) error {
 	fs := flag.NewFlagSet("proposal-apply", flag.ExitOnError)
@@ -43,7 +31,7 @@ func applyProposal(workDir, flattenedFile string) error {
 		return err
 	}
 
-	if err := validateProposalTarget(realPath); err != nil {
+	if err := pipeline.ValidateTarget(realPath); err != nil {
 		return domain.Error(err, "reject proposal target")
 	}
 
@@ -106,42 +94,4 @@ func resolveProposalRealPath(flattenedFile string) (string, error) {
 
 	base := filepath.Base(flattenedFile)
 	return strings.ReplaceAll(base, "__", "/"), nil
-}
-
-func validateProposalTarget(p string) error {
-	if p == "" {
-		return errEmptyProposalPath
-	}
-	if strings.Contains(p, "..") || pathpkg.IsAbs(p) || pathpkg.Clean(p) != p {
-		return errProposalPathTraversal
-	}
-
-	switch {
-	case p == proposalClaudeMDPath:
-		return nil
-	case strings.HasPrefix(p, proposalRulesPrefix):
-		return requireMarkdownSuffix(p)
-	case strings.HasPrefix(p, proposalSkillsPrefix), strings.HasPrefix(p, proposalAgentsPrefix):
-		return nil
-	case isProjectMemoryProposal(p):
-		return nil
-	default:
-		return errProposalPathNotAllowed
-	}
-}
-
-func isProjectMemoryProposal(p string) bool {
-	parts := strings.Split(p, "/")
-	if len(parts) != 4 || parts[0] != "projects" || parts[2] != "memory" {
-		return false
-	}
-	name := parts[3]
-	return parts[1] != "" && name != memoryIndexFile && strings.HasSuffix(name, ".md")
-}
-
-func requireMarkdownSuffix(p string) error {
-	if !strings.HasSuffix(p, ".md") {
-		return errProposalRequiresMD
-	}
-	return nil
 }

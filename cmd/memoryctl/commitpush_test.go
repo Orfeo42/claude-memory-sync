@@ -52,4 +52,26 @@ func TestRunCommit(t *testing.T) {
 		log := runGit(t, workDir, nil, "log", "-1", "--format=%s")
 		assert.Contains(t, log, "add projects")
 	})
+
+	t.Run("missing pathspec returns false", func(t *testing.T) {
+		workDir := newTestWorkDir(t)
+		lock := filepath.Join(t.TempDir(), "canonical.lock")
+
+		committed, err := runCommit(context.Background(), workDir, lock, "no-op", "projects/new/memory")
+		require.NoError(t, err)
+		assert.False(t, committed)
+	})
+
+	t.Run("existing pathspec is committed", func(t *testing.T) {
+		workDir := newTestWorkDir(t)
+		lock := filepath.Join(t.TempDir(), "canonical.lock")
+
+		memoryDir := filepath.Join(workDir, "projects", "new", "memory")
+		require.NoError(t, os.MkdirAll(memoryDir, 0o750))
+		require.NoError(t, os.WriteFile(filepath.Join(memoryDir, "foo.md"), []byte("x"), 0o600))
+
+		committed, err := runCommit(context.Background(), workDir, lock, "add foo", "projects/new/memory")
+		require.NoError(t, err)
+		assert.True(t, committed)
+	})
 }
