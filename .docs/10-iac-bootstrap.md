@@ -55,6 +55,6 @@ Migration sequence (one-time): `wmill sync pull` from the live workspace into th
 
 ## Acceptance criteria
 
-- Fresh box + keyring secrets + (at most) one manual first-admin login → `just bootstrap` → approval inbox reachable, schedules armed with overlap guard, a manual `memory_intake` trigger completes on the correct workers.
+- Fresh box + keyring secrets + (at most) one manual first-admin login → `just bootstrap` → approval inbox reachable, schedules armed with overlap guard, a manual `f/memory/intake` trigger completes on the correct workers.
 - `wmill sync pull --dry-run` clean right after bootstrap.
 - No workspace object exists only in the UI: deleting the workspace and re-running bootstrap reproduces it (minus run history).

@@ -122,10 +122,10 @@ For each of `flows/intake.flow.yaml`, `flows/daily-synth.flow.yaml`,
 `flows/taskmine.flow.yaml`, `flows/proposal-apply.flow.yaml`: **Flows**
 → **New flow** (or open the existing one) → **Import from YAML**, paste
 the file, then work through whatever the editor flags per the caveat in
-the section above. Live paths: `u/luciorosadini87/memory_intake`,
-`u/luciorosadini87/memory_daily_synth`,
-`u/luciorosadini87/memory_taskmine`,
-`u/luciorosadini87/memory_proposal_apply` — the approval app starts the
+the section above. Live paths: `f/memory/intake`,
+`f/memory/daily_synth`,
+`f/memory/taskmine`,
+`f/memory/proposal_apply` — the approval app starts the
 last one by that exact path.
 
 ## 7. Schedules
@@ -181,7 +181,7 @@ can no longer lose a pending proposal. Design and status machine:
 Resolve proposals in the approval inbox app (`app/APP.md`), one by one:
 
 - **Approve** — moves it to `approved` and starts
-  `memory_proposal_apply`, which claims it, writes and commits it under
+  `f/memory/proposal_apply`, which claims it, writes and commits it under
   the canonical lock (`proposal: apply <kind> <name>`), pushes, and only
   then marks it `applied` with the commit sha. A push failure marks it
   `failed`; **Retry** in the app re-queues it.

@@ -9,7 +9,7 @@ Json: TypeAlias = "dict[str, Json] | list[Json] | str | int | float | bool | Non
 
 UUID = re.compile(r"[0-9a-f-]{36}")
 
-APPLY_FLOW_PATH = "f/u/luciorosadini87/memory_proposal_apply"
+APPLY_FLOW_PATH = "f/f/memory/proposal_apply"
 
 
 class ProposalFile(TypedDict):

@@ -104,7 +104,7 @@ Prerequisite: run it in its own maintenance window, not together with the phase 
     diff backups/baseline-old.txt backups/baseline-new.txt
     ```
     The diff must be empty.
-9. **Start Windmill:** `docker compose up -d`. Then: log in; Workers page shows both worker groups; flows, variables, schedules and the approval app are present; run `memory_intake` manually and see it succeed; open an old run from before the migration.
+9. **Start Windmill:** `docker compose up -d`. Then: log in; Workers page shows both worker groups; flows, variables, schedules and the approval app are present; run `f/memory/intake` manually and see it succeed; open an old run from before the migration.
 10. **After 7 clean days:** remove `windmill-db-data:` from `compose.yaml`, `docker volume rm memory-server_windmill-db-data`, and delete `backups/windmill-cluster-*.sql` (or move it off the Pi).
 
 ## Rollback

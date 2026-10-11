@@ -30,7 +30,7 @@ Each runnable is self-contained (pasted separately into the editor), so the smal
 
 ## Apply-flow path
 
-`decide_proposal.py` and `retry_proposal.py` define the module constant `APPLY_FLOW_PATH = "f/u/luciorosadini87/memory_proposal_apply"` and `POST {BASE_INTERNAL_URL}/api/w/{WM_WORKSPACE}/jobs/run/{APPLY_FLOW_PATH}` with body `{}`. Change the constant in both files if the flow moves.
+`decide_proposal.py` and `retry_proposal.py` define the module constant `APPLY_FLOW_PATH = "f/f/memory/proposal_apply"` and `POST {BASE_INTERNAL_URL}/api/w/{WM_WORKSPACE}/jobs/run/{APPLY_FLOW_PATH}` with body `{}`. Change the constant in both files if the flow moves.
 
 ## Setup — entirely in the Windmill UI
 
