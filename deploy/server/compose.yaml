@@ -2,6 +2,7 @@ services:
   memory-server:
     image: ghcr.io/orfeo42/claude-memory-sync-server:latest
     pull_policy: "always"
+    init: true
     volumes:
       - memory-data:/data
     environment:
@@ -47,6 +48,7 @@ services:
   windmill-worker-llm-steps:
     image: ghcr.io/orfeo42/claude-memory-sync-windmill-worker:latest
     pull_policy: "always"
+    init: true
     environment:
       DATABASE_URL: postgres://windmill:${WINDMILL_DB_PASSWORD:?}@windmill-db/windmill?sslmode=disable
       MODE: worker
@@ -65,6 +67,7 @@ services:
   windmill-worker-ui-backend:
     image: ghcr.io/orfeo42/claude-memory-sync-windmill-worker:latest
     pull_policy: "always"
+    init: true
     environment:
       DATABASE_URL: postgres://windmill:${WINDMILL_DB_PASSWORD:?}@windmill-db/windmill?sslmode=disable
       MODE: worker

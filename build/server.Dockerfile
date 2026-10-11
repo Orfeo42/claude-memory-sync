@@ -8,6 +8,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH GOARM=${TARGETVARIANT#v} go 
 
 FROM alpine:3
 RUN apk add --no-cache git
+RUN git config --system maintenance.autoDetach false && git config --system gc.autoDetach false
 RUN addgroup -g 1000 memory && adduser -D -u 1000 -G memory memory
 RUN mkdir -p /data && chown -R memory:memory /data
 COPY --from=build /out/server /usr/local/bin/server
