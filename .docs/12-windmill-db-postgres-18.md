@@ -1,6 +1,8 @@
 # Phase 12 — windmill-db Postgres 16 → 18
 
-Status: **plan, rehearsed, not executed on the Pi** (2026-10-11). Follows the official Windmill guide (<https://www.windmill.dev/docs/advanced/self_host/postgres_18_upgrade>), adapted to this deployment.
+Status: **superseded 2026-11-21** by phase 13 (`13-drop-windmill.md`) — kept as history.
+
+Original status: **plan, rehearsed, not executed on the Pi** (2026-10-11). Follows the official Windmill guide (<https://www.windmill.dev/docs/advanced/self_host/postgres_18_upgrade>), adapted to this deployment.
 
 ## Rehearsal (2026-10-11)
 

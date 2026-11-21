@@ -1,5 +1,7 @@
 # Phase 10 — one-shot IaC bootstrap for the Windmill pipeline
 
+Status: **superseded 2026-11-21** by phase 13 (`13-drop-windmill.md`) — kept as history.
+
 Goal: a fresh server box goes from bare Docker to a fully working stack — containers, Windmill workspace `memory`, flows, variables, schedules, approval app, secrets — with one command, and the repo stays the single source of truth afterwards (no more paste-into-UI drift like the retired-shell-services drift found 2026-08-30).
 
 ## Key finding: there is no Terraform provider for Windmill

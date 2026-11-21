@@ -1,8 +1,5 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
-windmill_url := env("WINDMILL_URL", "http://raspberry.local:8081")
-windmill_workspace := env("WINDMILL_WORKSPACE", "memory")
-
 [group('build')]
 build dir="./...": gen-mocks
     go build {{ dir }}
@@ -125,64 +122,11 @@ gen-mocks dir="./...":
 gen-mocks-force: && gen-mocks
     find . -name '*_mock.go' -not -path './.git/*' -delete
 
-[group('windmill')]
-windmill-failed-count:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    base="{{ windmill_url }}/api/w/{{ windmill_workspace }}"
-    token=$(~/.claude/skills/secrets/bin/get-secret windmill)
-
-    api_get() {
-        local path="$1"
-        curl -fsS -H "Authorization: Bearer ${token}" "${base}${path}"
-    }
-
-    total=$(api_get "/jobs/completed/list?success=false&per_page=10000" | jq 'length')
-    echo "failed total: ${total}"
-    echo "count  canceled  path"
-    api_get "/jobs/completed/list?success=false&per_page=10000" |
-        jq -r 'group_by([(.script_path // .job_kind), .canceled])
-            | map({n: length, c: .[0].canceled, p: (.[0].script_path // .[0].job_kind)})
-            | sort_by(-.n)[]
-            | "\(.n)  \(.c)  \(.p)"'
-
-[confirm("Delete ALL failed Windmill runs and their logs? This is irreversible.")]
-[group('windmill')]
-windmill-delete-failed batch="500":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    base="{{ windmill_url }}/api/w/{{ windmill_workspace }}"
-    batch="{{ batch }}"
-    token=$(~/.claude/skills/secrets/bin/get-secret windmill)
-
-    first_page() {
-        curl -fsS -H "Authorization: Bearer ${token}" \
-            "${base}/jobs/completed/list?success=false&per_page=${batch}" | jq '[.[].id]'
-    }
-
-    delete_ids() {
-        local ids="$1"
-        curl -fsS -X POST -H "Authorization: Bearer ${token}" \
-            -H "Content-Type: application/json" -d "${ids}" "${base}/jobs/delete"
-    }
-
-    total=0
-    previous_first=""
-    while true; do
-        ids=$(first_page)
-        count=$(jq 'length' <<<"${ids}")
-        if [[ "${count}" -eq 0 ]]; then
-            echo "done, total deleted: ${total}"
-            exit 0
-        fi
-        first=$(jq -r '.[0]' <<<"${ids}")
-        if [[ "${first}" == "${previous_first}" ]]; then
-            echo "no progress: job ${first} still listed after delete" >&2
-            exit 1
-        fi
-        previous_first="${first}"
-        delete_ids "${ids}"
-        echo
-        total=$((total + count))
-        echo "deleted batch of ${count}, running total: ${total}"
-    done
+[group('web')]
+[working-directory: 'web']
+web-check:
+    npm ci
+    npm run typecheck
+    npm run lint
+    npm test
+    npm run build

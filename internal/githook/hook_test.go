@@ -166,6 +166,33 @@ func TestValidate(t *testing.T) {
 		assert.Contains(t, err.Error(), "global/skills/foo/creds.md")
 	})
 
+	t.Run("rejects hidden character with path offset and code point", func(t *testing.T) {
+		bareDir := newBareRepo(t)
+		workDir := newWorkTree(t)
+		execGit(t, workDir, "remote", "add", "origin", bareDir)
+		commitFile(t, workDir, "global/skills/foo/SKILL.md", "ab\u202Ecd")
+
+		oldSHA, newSHA := pushCommit(t, workDir, bareDir)
+
+		err := githook.Validate(t.Context(), bareDir, strings.NewReader(updateLine(oldSHA, newSHA, "refs/heads/main")))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "global/skills/foo/SKILL.md")
+		assert.Contains(t, err.Error(), "U+202E")
+		assert.Contains(t, err.Error(), "byte 2")
+	})
+
+	t.Run("accepts emoji ZWJ sequence", func(t *testing.T) {
+		bareDir := newBareRepo(t)
+		workDir := newWorkTree(t)
+		execGit(t, workDir, "remote", "add", "origin", bareDir)
+		commitFile(t, workDir, "global/skills/foo/SKILL.md", "family \U0001F468\u200D\U0001F469\u200D\U0001F467\n")
+
+		oldSHA, newSHA := pushCommit(t, workDir, bareDir)
+
+		err := githook.Validate(t.Context(), bareDir, strings.NewReader(updateLine(oldSHA, newSHA, "refs/heads/main")))
+		require.NoError(t, err)
+	})
+
 	t.Run("accepts docs that mention tokens in prose", func(t *testing.T) {
 		bareDir := newBareRepo(t)
 		workDir := newWorkTree(t)

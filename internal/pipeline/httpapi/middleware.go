@@ -13,9 +13,9 @@ import (
 const (
 	bearerPrefix = "Bearer "
 	roleKey      = "role"
-	roleNone     = "none"
-	roleWriter   = "writer"
-	roleAdmin    = "admin"
+	RoleNone     = "none"
+	RoleWriter   = "writer"
+	RoleAdmin    = "admin"
 )
 
 func tokenMatches(presented, expected string) bool {
@@ -29,7 +29,7 @@ func decide(presented, requiredRole, writerToken, adminToken string) int {
 	switch {
 	case !isAdmin && !isWriter:
 		return http.StatusUnauthorized
-	case requiredRole == roleWriter, requiredRole == roleAdmin && isAdmin:
+	case requiredRole == RoleWriter, requiredRole == RoleAdmin && isAdmin:
 		return http.StatusOK
 	default:
 		return http.StatusForbidden
@@ -45,7 +45,7 @@ func authMiddleware(baseCtx context.Context, api huma.API, writerToken, adminTok
 			}
 		}
 
-		if role == roleNone {
+		if role == RoleNone {
 			next(ctx)
 			return
 		}

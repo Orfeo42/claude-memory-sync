@@ -20,31 +20,6 @@ services:
       - ${MEMORY_BACKUP_SSH_KEY:-/dev/null}:/root/.ssh/id_ed25519:ro
     entrypoint: ["git", "-C", "/data", "push", "origin", "storage"]
 
-  windmill-db:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: windmill
-      POSTGRES_DB: windmill
-      POSTGRES_PASSWORD: ${WINDMILL_DB_PASSWORD:?}
-    volumes:
-      - windmill-db-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U windmill"]
-    restart: unless-stopped
-
-  windmill-server:
-    image: ghcr.io/windmill-labs/windmill:main
-    pull_policy: "always"
-    environment:
-      DATABASE_URL: postgres://windmill:${WINDMILL_DB_PASSWORD:?}@windmill-db/windmill?sslmode=disable
-      MODE: server
-    ports:
-      - "8081:8000"
-    depends_on:
-      windmill-db:
-        condition: service_healthy
-    restart: unless-stopped
-
   pipeline-db:
     image: postgres:18-alpine
     environment:
@@ -74,55 +49,23 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  windmill-worker-llm-steps:
-    image: ghcr.io/orfeo42/claude-memory-sync-windmill-worker:latest
+  synth:
+    image: ghcr.io/orfeo42/claude-memory-sync-synth:latest
     pull_policy: "always"
     init: true
-    environment:
-      DATABASE_URL: postgres://windmill:${WINDMILL_DB_PASSWORD:?}@windmill-db/windmill?sslmode=disable
-      MODE: worker
-      WORKER_GROUP: default
-      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:?}
-      PIPELINE_URL: http://pipeline-api:8090
-      PIPELINE_TOKEN: ${PIPELINE_TOKEN:?}
-      WHITELIST_ENVS: CLAUDE_CODE_OAUTH_TOKEN,PIPELINE_URL,PIPELINE_TOKEN
-    networks:
-      - default
-      - pipeline
     volumes:
       - memory-data:/data
-    depends_on:
-      windmill-db:
-        condition: service_healthy
-      windmill-server:
-        condition: service_started
-      pipeline-api:
-        condition: service_started
-    restart: unless-stopped
-
-  windmill-worker-ui-backend:
-    image: ghcr.io/orfeo42/claude-memory-sync-windmill-worker:latest
-    pull_policy: "always"
-    init: true
     environment:
-      DATABASE_URL: postgres://windmill:${WINDMILL_DB_PASSWORD:?}@windmill-db/windmill?sslmode=disable
-      MODE: worker
-      WORKER_GROUP: ui-backend
-      WORKER_TAGS: python3,dependency
-      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:?}
       PIPELINE_URL: http://pipeline-api:8090
       PIPELINE_TOKEN: ${PIPELINE_ADMIN_TOKEN:?}
-      WHITELIST_ENVS: CLAUDE_CODE_OAUTH_TOKEN,PIPELINE_URL,PIPELINE_TOKEN
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      TZ: ${TZ:-Europe/Rome}
+    ports:
+      - "${SYNTH_BIND:-127.0.0.1}:8082:8082"
     networks:
       - default
       - pipeline
-    volumes:
-      - memory-data:/data
     depends_on:
-      windmill-db:
-        condition: service_healthy
-      windmill-server:
-        condition: service_started
       pipeline-api:
         condition: service_started
     restart: unless-stopped
@@ -135,5 +78,4 @@ networks:
 
 volumes:
   memory-data:
-  windmill-db-data:
   pipeline-db-data:

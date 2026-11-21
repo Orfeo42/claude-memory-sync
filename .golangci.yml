@@ -147,6 +147,10 @@ linters:
         text: "G204"
         linters:
           - gosec
+      - path: internal/llm/llm\.go
+        text: "G204"
+        linters:
+          - gosec
       - path: internal/gitserver/protocol\.go
         linters:
           - gosec

@@ -17,7 +17,7 @@ jobs:
         component: [server, agent, pipeline]
         platforms: ["linux/amd64,linux/arm64,linux/arm/v7"]
         include:
-          - component: windmill-worker
+          - component: synth
             platforms: "linux/amd64,linux/arm64"
     steps:
       - uses: actions/checkout@v7

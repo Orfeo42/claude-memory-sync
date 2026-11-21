@@ -6,7 +6,7 @@ a Go server container on an always-on home box is the single sync
 point, hosting bare git repos served over smart-HTTP; each machine runs
 a Docker agent container (only per-machine dependency: Docker) that
 commits its whitelisted `~/.claude` state to a local staging repo and
-pushes the difference. An async intake pass decides what enters the
+pushes the difference. An async intake pass (the `synth` service) decides what enters the
 shared knowledge base (`canonical`); agents poll it back down.
 
 **This repo is CODE ONLY** (server, agent, deploy, docs). Memory

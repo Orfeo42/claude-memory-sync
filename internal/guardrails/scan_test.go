@@ -27,3 +27,18 @@ func TestScanSecrets(t *testing.T) {
 		require.NoError(t, err)
 	})
 }
+
+func TestScanHidden(t *testing.T) {
+	t.Run("detects a bidi override with offset and code point", func(t *testing.T) {
+		err := guardrails.ScanHidden([]byte("ab\u202Ecd"))
+		require.Error(t, err)
+		require.ErrorIs(t, err, guardrails.ErrHiddenCharacter)
+		assert.Contains(t, err.Error(), "U+202E")
+		assert.Contains(t, err.Error(), "byte 2")
+	})
+
+	t.Run("passes clean content", func(t *testing.T) {
+		err := guardrails.ScanHidden([]byte("just some regular notes\n"))
+		require.NoError(t, err)
+	})
+}

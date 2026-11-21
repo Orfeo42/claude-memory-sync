@@ -7,10 +7,11 @@ func (e sentinelError) Error() string {
 }
 
 const (
-	errMalformedInput sentinelError = "malformed pre-receive input"
-	errInvalidRef     sentinelError = "invalid ref"
-	errBranchDeletion sentinelError = "branch deletion is not allowed"
-	errPathNotAllowed sentinelError = "path is not in the sync whitelist"
-	errDisallowedMode sentinelError = "disallowed file mode"
-	errSecretDetected sentinelError = "secret pattern detected in file content"
+	errMalformedInput  sentinelError = "malformed pre-receive input"
+	errInvalidRef      sentinelError = "invalid ref"
+	errBranchDeletion  sentinelError = "branch deletion is not allowed"
+	errPathNotAllowed  sentinelError = "path is not in the sync whitelist"
+	errDisallowedMode  sentinelError = "disallowed file mode"
+	errSecretDetected  sentinelError = "secret pattern detected in file content"
+	errHiddenCharacter sentinelError = "hidden character detected in file content"
 )

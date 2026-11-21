@@ -7,6 +7,7 @@ import (
 
 	"claude-memory-sync/internal/domain"
 	"claude-memory-sync/internal/guardrails"
+	"claude-memory-sync/internal/hiddentext"
 )
 
 const (
@@ -40,6 +41,10 @@ func validateFiles(files []File) (string, error) {
 		seen[f.TargetPath] = true
 		if err := guardrails.ScanSecrets([]byte(f.Content)); err != nil {
 			return "", domain.Error(domain.ErrValidation, "proposal content contains a secret", slog.String("target_path", f.TargetPath))
+		}
+		if finding, found := hiddentext.Find([]byte(f.Content)); found {
+			return "", domain.Error(domain.ErrValidation, "proposal content contains a hidden character",
+				slog.String("target_path", f.TargetPath), slog.Int("offset", finding.Offset), slog.String("code_point", finding.CodePoint()))
 		}
 		if GroupOf(f.TargetPath) != group {
 			return "", domain.Error(domain.ErrValidation, "proposal files must share one group", slog.String("target_path", f.TargetPath))

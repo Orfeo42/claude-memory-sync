@@ -3,25 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
-	"io"
 	"os"
-	"strings"
 
 	"claude-memory-sync/internal/domain"
-	"claude-memory-sync/internal/guardrails"
+	"claude-memory-sync/internal/hotcache"
 )
-
-const (
-	reasonEmptyDigest    = "empty digest"
-	reasonDigestTooLarge = "digest too large"
-)
-
-type hotcacheResult struct {
-	Written bool   `json:"written"`
-	Reason  string `json:"reason"`
-}
 
 func cmdHotcacheWrite(_ context.Context, args []string) error {
 	fs := flag.NewFlagSet("hotcache-write", flag.ExitOnError)
@@ -31,7 +18,7 @@ func cmdHotcacheWrite(_ context.Context, args []string) error {
 		return domain.Error(err, "parse hotcache-write flags failed")
 	}
 
-	result, err := writeHotCache(*memoryDir, *maxBytes, os.Stdin)
+	result, err := hotcache.Write(*memoryDir, *maxBytes, os.Stdin)
 	if err != nil {
 		return err
 	}
@@ -40,25 +27,4 @@ func cmdHotcacheWrite(_ context.Context, args []string) error {
 		return domain.Error(err, "encode hotcache-write result failed")
 	}
 	return nil
-}
-
-func writeHotCache(memoryDir string, maxBytes int, in io.Reader) (hotcacheResult, error) {
-	digest, err := io.ReadAll(in)
-	if err != nil {
-		return hotcacheResult{}, domain.Error(err, "read digest input failed")
-	}
-
-	if strings.TrimSpace(string(digest)) == "" {
-		return hotcacheResult{Written: false, Reason: reasonEmptyDigest}, nil
-	}
-
-	err = guardrails.ReplaceHotBlock(memoryDir, digest, maxBytes)
-	if errors.Is(err, guardrails.ErrDigestTooLarge) {
-		return hotcacheResult{Written: false, Reason: reasonDigestTooLarge}, nil
-	}
-	if err != nil {
-		return hotcacheResult{}, domain.Error(err, "replace hot block failed")
-	}
-
-	return hotcacheResult{Written: true, Reason: ""}, nil
 }

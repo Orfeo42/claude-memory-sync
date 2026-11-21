@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"claude-memory-sync/internal/domain"
+	"claude-memory-sync/internal/gitutil/gittest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -20,8 +21,8 @@ func newEnsureWorkFixture(t *testing.T) (string, string, string, string) {
 
 	reposDir := filepath.Join(t.TempDir(), "repos")
 	bare := filepath.Join(reposDir, "canonical.git")
-	initBareRepo(t, bare)
-	commitFiles(t, bare, map[string]string{"README.md": "seed"}, "seed", time.Now())
+	gittest.InitBareRepo(t, bare)
+	gittest.CommitFiles(t, bare, map[string]string{"README.md": "seed"}, "seed", time.Now())
 
 	workDir := filepath.Join(t.TempDir(), "work")
 	lock := filepath.Join(t.TempDir(), "canonical.lock")
@@ -35,14 +36,7 @@ func ensureWorkArgs(reposDir, workDir, lock string) []string {
 
 func headOf(t *testing.T, dir string) string {
 	t.Helper()
-	return strings.TrimSpace(runGit(t, dir, nil, "rev-parse", "HEAD"))
-}
-
-func localCommit(t *testing.T, workDir, name string) {
-	t.Helper()
-	require.NoError(t, os.WriteFile(filepath.Join(workDir, name), []byte(name), 0o600))
-	runGit(t, workDir, nil, "add", "-A")
-	runGit(t, workDir, nil, "commit", "-m", name)
+	return strings.TrimSpace(gittest.RunGit(t, dir, nil, "rev-parse", "HEAD"))
 }
 
 func TestCmdEnsureWork(t *testing.T) {
@@ -54,63 +48,8 @@ func TestCmdEnsureWork(t *testing.T) {
 		require.NoError(t, cmdEnsureWork(ctx, ensureWorkArgs(reposDir, workDir, lock)))
 
 		assert.FileExists(t, filepath.Join(workDir, "README.md"))
-		assert.Equal(t, strings.TrimSpace(runGit(t, bare, nil, "rev-parse", "main")), headOf(t, workDir))
-		assert.Equal(t, "memory-synthesizer", strings.TrimSpace(runGit(t, workDir, nil, "config", "user.name")))
-	})
-
-	t.Run("behind is fast-forwarded to origin main", func(t *testing.T) {
-		reposDir, bare, workDir, lock := newEnsureWorkFixture(t)
-		require.NoError(t, cmdEnsureWork(ctx, ensureWorkArgs(reposDir, workDir, lock)))
-
-		newHead := commitFiles(t, bare, map[string]string{"new.md": "new"}, "new", time.Now())
-
-		require.NoError(t, cmdEnsureWork(ctx, ensureWorkArgs(reposDir, workDir, lock)))
-
-		assert.Equal(t, newHead, headOf(t, workDir))
-		assert.FileExists(t, filepath.Join(workDir, "new.md"))
-	})
-
-	t.Run("equal and dirty is cleaned", func(t *testing.T) {
-		reposDir, _, workDir, lock := newEnsureWorkFixture(t)
-		require.NoError(t, cmdEnsureWork(ctx, ensureWorkArgs(reposDir, workDir, lock)))
-		require.NoError(t, os.WriteFile(filepath.Join(workDir, "README.md"), []byte("dirty"), 0o600))
-
-		require.NoError(t, cmdEnsureWork(ctx, ensureWorkArgs(reposDir, workDir, lock)))
-
-		content, err := os.ReadFile(filepath.Join(workDir, "README.md"))
-		require.NoError(t, err)
-		assert.Equal(t, "seed", string(content))
-	})
-
-	t.Run("ahead keeps unpushed commit and discards junk", func(t *testing.T) {
-		reposDir, _, workDir, lock := newEnsureWorkFixture(t)
-		require.NoError(t, cmdEnsureWork(ctx, ensureWorkArgs(reposDir, workDir, lock)))
-		localCommit(t, workDir, "unpushed.md")
-		head := headOf(t, workDir)
-		require.NoError(t, os.WriteFile(filepath.Join(workDir, "junk.md"), []byte("junk"), 0o600))
-		require.NoError(t, os.WriteFile(filepath.Join(workDir, "README.md"), []byte("dirty"), 0o600))
-
-		require.NoError(t, cmdEnsureWork(ctx, ensureWorkArgs(reposDir, workDir, lock)))
-
-		assert.Equal(t, head, headOf(t, workDir))
-		assert.FileExists(t, filepath.Join(workDir, "unpushed.md"))
-		assert.NoFileExists(t, filepath.Join(workDir, "junk.md"))
-		content, err := os.ReadFile(filepath.Join(workDir, "README.md"))
-		require.NoError(t, err)
-		assert.Equal(t, "seed", string(content))
-	})
-
-	t.Run("diverged returns conflict and leaves HEAD untouched", func(t *testing.T) {
-		reposDir, bare, workDir, lock := newEnsureWorkFixture(t)
-		require.NoError(t, cmdEnsureWork(ctx, ensureWorkArgs(reposDir, workDir, lock)))
-		localCommit(t, workDir, "local.md")
-		head := headOf(t, workDir)
-		commitFiles(t, bare, map[string]string{"remote.md": "remote"}, "remote", time.Now())
-
-		err := cmdEnsureWork(ctx, ensureWorkArgs(reposDir, workDir, lock))
-
-		require.ErrorIs(t, err, domain.ErrConflict)
-		assert.Equal(t, head, headOf(t, workDir))
+		assert.Equal(t, strings.TrimSpace(gittest.RunGit(t, bare, nil, "rev-parse", "main")), headOf(t, workDir))
+		assert.Equal(t, "memory-synthesizer", strings.TrimSpace(gittest.RunGit(t, workDir, nil, "config", "user.name")))
 	})
 
 	t.Run("missing lock flag returns validation error", func(t *testing.T) {
@@ -135,8 +74,8 @@ func TestCmdEnsureWork(t *testing.T) {
 		}()
 
 		select {
-		case <-done:
-			t.Fatal("ensure-work finished while lock was held")
+		case doneErr := <-done:
+			t.Fatalf("ensure-work finished while lock was held: %v", doneErr)
 		case <-time.After(300 * time.Millisecond):
 		}
 

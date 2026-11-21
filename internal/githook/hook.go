@@ -108,7 +108,7 @@ func validateUpdate(ctx context.Context, gitDir string, update refUpdate) error 
 		}
 	}
 
-	return scanSecrets(ctx, gitDir, update.newSHA, entries)
+	return scanContent(ctx, gitDir, update.newSHA, entries)
 }
 
 func diffEntries(ctx context.Context, gitDir, base, newSHA string) ([]diffEntry, error) {

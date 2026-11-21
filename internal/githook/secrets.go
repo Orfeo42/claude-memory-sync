@@ -9,6 +9,7 @@ import (
 
 	"claude-memory-sync/internal/domain"
 	"claude-memory-sync/internal/gitutil"
+	"claude-memory-sync/internal/hiddentext"
 )
 
 const maxScannedFileSize = 1 << 20
@@ -20,13 +21,13 @@ func ContainsSecret(data []byte) bool {
 	return secretPattern.Match(data)
 }
 
-func scanSecrets(ctx context.Context, gitDir, newSHA string, entries []diffEntry) error {
+func scanContent(ctx context.Context, gitDir, newSHA string, entries []diffEntry) error {
 	for _, entry := range entries {
 		if entry.deleted {
 			continue
 		}
 
-		if err := scanSecretsInFile(ctx, gitDir, newSHA, entry.path); err != nil {
+		if err := scanBlob(ctx, gitDir, newSHA, entry.path); err != nil {
 			return err
 		}
 	}
@@ -34,7 +35,7 @@ func scanSecrets(ctx context.Context, gitDir, newSHA string, entries []diffEntry
 	return nil
 }
 
-func scanSecretsInFile(ctx context.Context, gitDir, newSHA, path string) error {
+func scanBlob(ctx context.Context, gitDir, newSHA, path string) error {
 	size, err := blobSize(ctx, gitDir, newSHA, path)
 	if err != nil {
 		return domain.Error(err, "failed to stat blob size", slog.String("path", path))
@@ -51,6 +52,11 @@ func scanSecretsInFile(ctx context.Context, gitDir, newSHA, path string) error {
 
 	if secretPattern.MatchString(content) {
 		return domain.Error(errSecretDetected, fmt.Sprintf("path %q appears to contain a secret", path), slog.String("path", path))
+	}
+
+	if finding, found := hiddentext.Find([]byte(content)); found {
+		return domain.Error(errHiddenCharacter, fmt.Sprintf("path %q contains hidden character %s at byte %d", path, finding.CodePoint(), finding.Offset),
+			slog.String("path", path), slog.Int("offset", finding.Offset), slog.String("code_point", finding.CodePoint()))
 	}
 
 	return nil

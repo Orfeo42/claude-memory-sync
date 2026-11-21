@@ -17,17 +17,22 @@ const (
 	apiVersion = "1.0.0"
 )
 
-func New(ctx context.Context, svc *pipeline.Service, writerToken, adminToken string) http.Handler {
+type Registrar func(api huma.API)
+
+func New(ctx context.Context, svc *pipeline.Service, writerToken, adminToken string, registrars ...Registrar) http.Handler {
 	mux := http.NewServeMux()
 	humaAPI := humago.New(mux, huma.DefaultConfig(apiTitle, apiVersion))
 
 	humaAPI.UseMiddleware(authMiddleware(ctx, humaAPI, writerToken, adminToken))
 	registerOperations(humaAPI, &controller{svc: svc})
+	for _, register := range registrars {
+		register(humaAPI)
+	}
 
 	return mux
 }
 
-func toHumaError(ctx context.Context, err error) error {
+func ToHumaError(ctx context.Context, err error) error {
 	status := domain.StatusCodeFromError(err)
 
 	switch {

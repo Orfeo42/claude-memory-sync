@@ -2,17 +2,312 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
+	"log/slog"
+	"net/http"
 	"os"
-	"path/filepath"
-	"strings"
+	"time"
 
 	"claude-memory-sync/internal/domain"
-	"claude-memory-sync/internal/guardrails"
 	"claude-memory-sync/internal/pipeline"
+	"claude-memory-sync/internal/pipeline/client"
+	"claude-memory-sync/internal/proposalapply"
 )
 
-const errProposalPathTraversal cliError = "proposal path is unsafe"
+const pipelineHTTPTimeout = 30 * time.Second
+
+type reviseInput struct {
+	Files []pipeline.File `json:"files"`
+}
+
+func newPipelineClient() (*client.Client, error) {
+	cfg, err := client.ConfigFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	return client.New(cfg, &http.Client{Timeout: pipelineHTTPTimeout}), nil
+}
+
+func proposalSubcommands() map[string]subcommandFunc {
+	return map[string]subcommandFunc{
+		"list":              cmdProposalList,
+		"get":               cmdProposalGet,
+		"rejections":        cmdProposalRejections,
+		"decide":            cmdProposalDecide,
+		"revise":            cmdProposalRevise,
+		"retry":             cmdProposalRetry,
+		"apply-approved":    cmdProposalApplyApproved,
+		"expire":            cmdProposalExpire,
+		"import":            cmdProposalImport,
+		"import-rejections": cmdProposalImportRejections,
+	}
+}
+
+func cmdProposal(ctx context.Context, args []string) error {
+	if len(args) < 1 {
+		return domain.Error(errUnknownSubcommand, "proposal subcommand required")
+	}
+
+	handler, ok := proposalSubcommands()[args[0]]
+	if !ok {
+		return domain.Error(errUnknownSubcommand, "unrecognized proposal subcommand")
+	}
+
+	return handler(ctx, args[1:])
+}
+
+func cmdProposalList(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("proposal list", flag.ExitOnError)
+	statusFlag := fs.String("status", "", "status filter")
+	kindFlag := fs.String("kind", "", "kind filter")
+	limit := fs.Int("limit", 0, "max results")
+	if err := fs.Parse(args); err != nil {
+		return domain.Error(err, "parse proposal list flags failed")
+	}
+
+	params := client.ListParams{Limit: *limit}
+	if *statusFlag != "" {
+		status, err := pipeline.ParseStatus(*statusFlag)
+		if err != nil {
+			return err
+		}
+		params.Status = &status
+	}
+	if *kindFlag != "" {
+		kind, err := pipeline.ParseKind(*kindFlag)
+		if err != nil {
+			return err
+		}
+		params.Kind = &kind
+	}
+
+	pipelineClient, err := newPipelineClient()
+	if err != nil {
+		return err
+	}
+	proposals, err := pipelineClient.List(ctx, params)
+	if err != nil {
+		return err
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(proposals); err != nil {
+		return domain.Error(err, "encode result failed")
+	}
+	return nil
+}
+
+func cmdProposalGet(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("proposal get", flag.ExitOnError)
+	id := fs.String("id", "", "proposal id")
+	if err := fs.Parse(args); err != nil {
+		return domain.Error(err, "parse proposal get flags failed")
+	}
+
+	pipelineClient, err := newPipelineClient()
+	if err != nil {
+		return err
+	}
+	detail, err := pipelineClient.Get(ctx, *id)
+	if err != nil {
+		return err
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(detail); err != nil {
+		return domain.Error(err, "encode result failed")
+	}
+	return nil
+}
+
+func cmdProposalRejections(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("proposal rejections", flag.ExitOnError)
+	kindFlag := fs.String("kind", "", "kind filter")
+	if err := fs.Parse(args); err != nil {
+		return domain.Error(err, "parse proposal rejections flags failed")
+	}
+
+	var kind *pipeline.Kind
+	if *kindFlag != "" {
+		parsed, err := pipeline.ParseKind(*kindFlag)
+		if err != nil {
+			return err
+		}
+		kind = &parsed
+	}
+
+	pipelineClient, err := newPipelineClient()
+	if err != nil {
+		return err
+	}
+	rejections, err := pipelineClient.Rejections(ctx, kind)
+	if err != nil {
+		return err
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(rejections); err != nil {
+		return domain.Error(err, "encode result failed")
+	}
+	return nil
+}
+
+func cmdProposalDecide(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("proposal decide", flag.ExitOnError)
+	id := fs.String("id", "", "proposal id")
+	decision := fs.String("decision", "", "approve or reject")
+	actor := fs.String("actor", "", "actor")
+	reason := fs.String("reason", "", "reason")
+	if err := fs.Parse(args); err != nil {
+		return domain.Error(err, "parse proposal decide flags failed")
+	}
+
+	pipelineClient, err := newPipelineClient()
+	if err != nil {
+		return err
+	}
+	proposal, err := pipelineClient.Decide(ctx, *id, client.DecideRequest{Decision: *decision, Actor: *actor, Reason: *reason})
+	if err != nil {
+		return err
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(proposal); err != nil {
+		return domain.Error(err, "encode result failed")
+	}
+	return nil
+}
+
+func cmdProposalRevise(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("proposal revise", flag.ExitOnError)
+	id := fs.String("id", "", "proposal id")
+	actor := fs.String("actor", "", "actor")
+	if err := fs.Parse(args); err != nil {
+		return domain.Error(err, "parse proposal revise flags failed")
+	}
+
+	var input reviseInput
+	if err := json.NewDecoder(os.Stdin).Decode(&input); err != nil {
+		return domain.Error(domain.ErrValidation, "decode revise input failed", slog.String("cause", err.Error()))
+	}
+
+	pipelineClient, err := newPipelineClient()
+	if err != nil {
+		return err
+	}
+	proposal, err := pipelineClient.Revise(ctx, *id, client.ReviseRequest{Actor: *actor, Files: input.Files})
+	if err != nil {
+		return err
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(proposal); err != nil {
+		return domain.Error(err, "encode result failed")
+	}
+	return nil
+}
+
+func cmdProposalRetry(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("proposal retry", flag.ExitOnError)
+	id := fs.String("id", "", "proposal id")
+	actor := fs.String("actor", "", "actor")
+	if err := fs.Parse(args); err != nil {
+		return domain.Error(err, "parse proposal retry flags failed")
+	}
+
+	pipelineClient, err := newPipelineClient()
+	if err != nil {
+		return err
+	}
+	proposal, err := pipelineClient.Retry(ctx, *id, *actor)
+	if err != nil {
+		return err
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(proposal); err != nil {
+		return domain.Error(err, "encode result failed")
+	}
+	return nil
+}
+
+func cmdProposalExpire(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("proposal expire", flag.ExitOnError)
+	olderThan := fs.Duration("older-than", 0, "expire pending proposals older than this duration")
+	actor := fs.String("actor", "", "actor")
+	if err := fs.Parse(args); err != nil {
+		return domain.Error(err, "parse proposal expire flags failed")
+	}
+
+	pipelineClient, err := newPipelineClient()
+	if err != nil {
+		return err
+	}
+	result, err := proposalapply.Expire(ctx, pipelineClient, *actor, *olderThan)
+	if err != nil {
+		return err
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
+		return domain.Error(err, "encode result failed")
+	}
+	return nil
+}
+
+func cmdProposalApplyApproved(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("proposal apply-approved", flag.ExitOnError)
+	workDir := fs.String("work-dir", "", "work directory")
+	lock := fs.String("lock", "", "lock file path")
+	worker := fs.String("worker", "", "worker name")
+	if err := fs.Parse(args); err != nil {
+		return domain.Error(err, "parse proposal apply-approved flags failed")
+	}
+
+	pipelineClient, err := newPipelineClient()
+	if err != nil {
+		return err
+	}
+
+	result, applyErr := proposalapply.ApplyApproved(ctx, pipelineClient, proposalapply.ApplyApprovedOptions{WorkDir: *workDir, Lock: *lock, Worker: *worker})
+	if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
+		return domain.Error(err, "encode result failed")
+	}
+	return applyErr
+}
+
+func cmdProposalImport(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("proposal import", flag.ExitOnError)
+	dir := fs.String("dir", "", "staging directory")
+	sourceFlow := fs.String("source-flow", "", "source flow")
+	if err := fs.Parse(args); err != nil {
+		return domain.Error(err, "parse proposal import flags failed")
+	}
+
+	pipelineClient, err := newPipelineClient()
+	if err != nil {
+		return err
+	}
+
+	outcome, err := proposalapply.Import(ctx, pipelineClient, *dir, *sourceFlow)
+	if err != nil {
+		return err
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(outcome); err != nil {
+		return domain.Error(err, "encode result failed")
+	}
+	return nil
+}
+
+func cmdProposalImportRejections(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("proposal import-rejections", flag.ExitOnError)
+	file := fs.String("file", "", "legacy rejected-names file")
+	actor := fs.String("actor", "", "actor")
+	if err := fs.Parse(args); err != nil {
+		return domain.Error(err, "parse proposal import-rejections flags failed")
+	}
+
+	pipelineClient, err := newPipelineClient()
+	if err != nil {
+		return err
+	}
+
+	result, err := proposalapply.ImportRejections(ctx, pipelineClient, proposalapply.ImportRejectionsOptions{File: *file, Actor: *actor})
+	if err != nil {
+		return err
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
+		return domain.Error(err, "encode result failed")
+	}
+	return nil
+}
 
 func cmdProposalApply(_ context.Context, args []string) error {
 	fs := flag.NewFlagSet("proposal-apply", flag.ExitOnError)
@@ -22,76 +317,5 @@ func cmdProposalApply(_ context.Context, args []string) error {
 		return domain.Error(err, "parse proposal-apply flags failed")
 	}
 
-	return applyProposal(*workDir, *file)
-}
-
-func applyProposal(workDir, flattenedFile string) error {
-	realPath, err := resolveProposalRealPath(flattenedFile)
-	if err != nil {
-		return err
-	}
-
-	if err := pipeline.ValidateTarget(realPath); err != nil {
-		return domain.Error(err, "reject proposal target")
-	}
-
-	content, err := os.ReadFile(flattenedFile)
-	if err != nil {
-		return domain.Error(err, "read proposal file failed")
-	}
-
-	if err := guardrails.ScanSecrets(content); err != nil {
-		return domain.Error(err, "proposal secret scan failed")
-	}
-
-	dest, err := resolveProposalDest(workDir, realPath)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
-		return domain.Error(err, "create proposal target directory failed")
-	}
-	if err := writeProposalContent(dest, content); err != nil {
-		return domain.Error(err, "write proposal file failed")
-	}
-	return nil
-}
-
-func writeProposalContent(dest string, content []byte) error {
-	file, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = file.Close()
-	}()
-
-	_, err = file.Write(content)
-	return err
-}
-
-func resolveProposalDest(workDir, realPath string) (string, error) {
-	base := filepath.Clean(workDir)
-	dest := filepath.Clean(filepath.Join(base, filepath.FromSlash(realPath)))
-
-	if dest != base && !strings.HasPrefix(dest, base+string(filepath.Separator)) {
-		return "", domain.Error(errProposalPathTraversal, "resolved proposal path escapes work directory")
-	}
-
-	return dest, nil
-}
-
-func resolveProposalRealPath(flattenedFile string) (string, error) {
-	sidecarPath := flattenedFile + ".path"
-
-	content, err := os.ReadFile(sidecarPath)
-	if err == nil {
-		return strings.TrimSpace(string(content)), nil
-	}
-	if !os.IsNotExist(err) {
-		return "", domain.Error(err, "read proposal sidecar failed")
-	}
-
-	base := filepath.Base(flattenedFile)
-	return strings.ReplaceAll(base, "__", "/"), nil
+	return proposalapply.ApplyFile(*workDir, *file)
 }

@@ -14,5 +14,6 @@ const (
 	ErrMissingDescription  guardrailError = "frontmatter is missing a non-empty description field"
 	ErrMissingMetadataType guardrailError = "frontmatter metadata block is missing a non-empty type field"
 	ErrSecretDetected      guardrailError = "secret pattern detected in content"
+	ErrHiddenCharacter     guardrailError = "hidden character detected in content"
 	ErrDigestTooLarge      guardrailError = "digest exceeds maximum allowed size"
 )

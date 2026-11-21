@@ -2,6 +2,8 @@
 
 Status: **decided 2026-10-11, phase 1 in implementation** (service, DB, client, deploy wiring). Phase 2 (flows, approval app, import of existing staging dirs) follows.
 
+Phase 13 (`13-drop-windmill.md`) moved the flows and the approval app from Windmill into the `synth` service and added two more domains to pipeline-api, `settings` (prompt, param, schedule and token overrides with versions) and `runs` (run and step history), each with its own tables, migrations and routes. Sentences below that mention Windmill describe the state at the time.
+
 ## Problem (incident 2026-10-11)
 
 Human-gated state lives inside Windmill flow runs. `daily-synth` and `taskmine` stage proposals under `/data/state/proposals/<root-flow-job-id>/`, then park in a `suspend` step (`timeout: 604800`, 7 days) until someone resumes them.
@@ -24,11 +26,11 @@ Git (`canonical.git`) stays the only source of truth for memory content. The ser
 | network | members | purpose |
 | --- | --- | --- |
 | `pipeline-db-net` (`internal: true`) | `pipeline-db`, `pipeline-api` | only the API holds DB credentials |
-| `pipeline` (`internal: true`) | `pipeline-api`, `windmill-worker-llm-steps`, `windmill-worker-ui-backend` | workers reach the API with a bearer token |
+| `pipeline` (`internal: true`) | `pipeline-api`, `synth` | synth reaches the API with a bearer token |
 
 - `pipeline-db`: `postgres:18-alpine`, own volume `pipeline-db-data` mounted at `/var/lib/postgresql` (Postgres 18 image layout), own credentials (`PIPELINE_DB_PASSWORD`). Never shares the `windmill-db` instance, database or role. No published port.
 - `pipeline-api`: own image `ghcr.io/orfeo42/claude-memory-sync-pipeline`, no published port, no `/data` mount. It is the only schema owner: migrations run at startup.
-- Two tokens: `PIPELINE_TOKEN` (writer: create, list, read, claim, mark applied/failed, expire, rejections) and `PIPELINE_ADMIN_TOKEN` (writer + decide, revise, retry). The client always reads `PIPELINE_TOKEN`; compose sets it to the writer token on `windmill-worker-llm-steps` and to the admin token on `windmill-worker-ui-backend`. The LLM-steps worker, which runs `claude -p` over corpus content, cannot approve anything.
+- Two tokens: `PIPELINE_TOKEN` (writer: create, list, read, claim, mark applied/failed, expire, rejections) and `PIPELINE_ADMIN_TOKEN` (writer + decide, revise, retry). The client always reads `PIPELINE_TOKEN`; since phase 13 compose sets it to the admin token on `synth`, the only client (it also hosts the approval UI), and the admin token passes the writer routes. Originally the LLM-steps Windmill worker held the writer token so that the process running `claude -p` over corpus content could not approve anything.
 - Cost on the Pi: one Postgres process (~20–40 MB RAM idle) and one static Go process (a few MB).
 
 ## Data model
@@ -163,9 +165,9 @@ Config (env, read in `cmd/pipeline/config.go`): `PIPELINE_DATABASE_URL` (require
 - `apply-approved` output gains `applied_proposals: [{id, kind, name, targets}]` (only proposals marked applied after a successful push), used by the cleanup step.
 - `taskmine` = `ensure_work` → `draft`. The draft prompt's "pending" list is the names of `pending` + `approved` proposals and its "rejected" list comes from `memoryctl proposal rejections`; output goes to `ops-apply --source-flow taskmine --source-run <root job id>`. No approval branch.
 - `daily-synth` = `ensure_work` → condense → distill (`ops-apply --source-flow daily-synth`) → `hotcache` → `push`, every day, with no gate in between.
-- `proposal-apply` (new, Windmill path `f/memory/proposal_apply`, schedule `0 */10 * * * *` with `no_flow_overlap: true`, also started by the app after approve/retry) = `ensure_work` → `expire` (336h) → `apply` (`apply-approved`, exit code captured into the result) → `cleanup` (the former taskmine post-promotion LLM cleanup of evidence entries, for applied skills) → `report` (fails the run if anything failed).
+- `proposal-apply` (new; now the `proposal-apply` flow of `synth`, schedule `*/10 * * * *`, one run at a time, also started by the app after approve/retry) = `ensure_work` → `expire` (336h) → `apply` (`apply-approved`, exit code captured into the result) → `cleanup` (the former taskmine post-promotion LLM cleanup of evidence entries, for applied skills) → `report` (fails the run if anything failed).
 - `ensure-work --lock` (shipped before phase 2): sync runs under `canonical.lock`; `HEAD` behind/equal → `reset --hard origin/main`; ahead → unpushed commits kept, only uncommitted junk dropped; diverged → `ErrConflict`, no reset. Safe because `canonical.git` only advances via pushes from this work dir and flow steps run one at a time on the single `default` worker; scaling that worker group beyond one would need per-step write locking.
-- App runnables: `list_proposals`, `get_proposal`, `decide_proposal`, `retry_proposal`, `chat_proposal`, `apply_revision`, all through `memoryctl proposal …` (admin token on the `ui-backend` worker). `list_suspended`, `resume_run`, `cancel_run`, `debug_suspended` are deleted.
+- App runnables (now the synth `/api/proposals…` routes): `list_proposals`, `get_proposal`, `decide_proposal`, `retry_proposal`, `chat_proposal`, `apply_revision`, all through `memoryctl proposal …` (admin token). `list_suspended`, `resume_run`, `cancel_run`, `debug_suspended` are deleted.
 
 ### Rollout (order matters)
 

@@ -101,6 +101,15 @@ func TestServiceCreate(t *testing.T) {
 		assert.Empty(t, repo.CreateCalls())
 	})
 
+	t.Run("rejects hidden characters", func(t *testing.T) {
+		repo := &MockRepository{}
+
+		_, err := NewService(repo).Create(context.Background(), "f", "r", []File{{TargetPath: rulePath, Content: "ab\u202Ecd"}})
+
+		require.ErrorIs(t, err, domain.ErrValidation)
+		assert.Empty(t, repo.CreateCalls())
+	})
+
 	t.Run("rejects files from different groups", func(t *testing.T) {
 		repo := &MockRepository{}
 		files := []File{{TargetPath: rulePath, Content: "a"}, {TargetPath: "global/rules/py.md", Content: "b"}}
@@ -276,6 +285,15 @@ func TestServiceRevise(t *testing.T) {
 		repo := &MockRepository{}
 
 		_, err := NewService(repo).Revise(context.Background(), "p1", "alice", []File{{TargetPath: rulePath, Content: secretContent}})
+
+		require.ErrorIs(t, err, domain.ErrValidation)
+		assert.Empty(t, repo.GetCalls())
+	})
+
+	t.Run("rejects hidden characters before reading", func(t *testing.T) {
+		repo := &MockRepository{}
+
+		_, err := NewService(repo).Revise(context.Background(), "p1", "alice", []File{{TargetPath: rulePath, Content: "ab\u202Ecd"}})
 
 		require.ErrorIs(t, err, domain.ErrValidation)
 		assert.Empty(t, repo.GetCalls())

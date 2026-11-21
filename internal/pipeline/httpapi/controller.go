@@ -138,7 +138,7 @@ type addRejectionInput struct {
 	}
 }
 
-func operation(id, method, path, role string, status int) huma.Operation {
+func Operation(id, method, path, role string, status int) huma.Operation {
 	return huma.Operation{
 		OperationID:   id,
 		Method:        method,
@@ -149,19 +149,19 @@ func operation(id, method, path, role string, status int) huma.Operation {
 }
 
 func registerOperations(api huma.API, c *controller) {
-	huma.Register(api, operation("healthz", http.MethodGet, healthzPath, roleNone, http.StatusOK), c.healthz)
-	huma.Register(api, operation("create-proposal", http.MethodPost, "/v1/proposals", roleWriter, http.StatusCreated), c.create)
-	huma.Register(api, operation("list-proposals", http.MethodGet, "/v1/proposals", roleWriter, http.StatusOK), c.list)
-	huma.Register(api, operation("claim-proposal", http.MethodPost, "/v1/proposals/claim", roleWriter, http.StatusOK), c.claim)
-	huma.Register(api, operation("expire-proposals", http.MethodPost, "/v1/proposals/expire", roleWriter, http.StatusOK), c.expire)
-	huma.Register(api, operation("get-proposal", http.MethodGet, "/v1/proposals/{id}", roleWriter, http.StatusOK), c.get)
-	huma.Register(api, operation("decide-proposal", http.MethodPost, "/v1/proposals/{id}/decision", roleAdmin, http.StatusOK), c.decide)
-	huma.Register(api, operation("revise-proposal", http.MethodPut, "/v1/proposals/{id}/files", roleAdmin, http.StatusOK), c.revise)
-	huma.Register(api, operation("retry-proposal", http.MethodPost, "/v1/proposals/{id}/retry", roleAdmin, http.StatusOK), c.retry)
-	huma.Register(api, operation("applied-proposal", http.MethodPost, "/v1/proposals/{id}/applied", roleWriter, http.StatusOK), c.applied)
-	huma.Register(api, operation("failed-proposal", http.MethodPost, "/v1/proposals/{id}/failed", roleWriter, http.StatusOK), c.failed)
-	huma.Register(api, operation("list-rejections", http.MethodGet, "/v1/rejections", roleWriter, http.StatusOK), c.rejections)
-	huma.Register(api, operation("add-rejection", http.MethodPost, "/v1/rejections", roleAdmin, http.StatusNoContent), c.addRejection)
+	huma.Register(api, Operation("healthz", http.MethodGet, healthzPath, RoleNone, http.StatusOK), c.healthz)
+	huma.Register(api, Operation("create-proposal", http.MethodPost, "/v1/proposals", RoleWriter, http.StatusCreated), c.create)
+	huma.Register(api, Operation("list-proposals", http.MethodGet, "/v1/proposals", RoleWriter, http.StatusOK), c.list)
+	huma.Register(api, Operation("claim-proposal", http.MethodPost, "/v1/proposals/claim", RoleWriter, http.StatusOK), c.claim)
+	huma.Register(api, Operation("expire-proposals", http.MethodPost, "/v1/proposals/expire", RoleWriter, http.StatusOK), c.expire)
+	huma.Register(api, Operation("get-proposal", http.MethodGet, "/v1/proposals/{id}", RoleWriter, http.StatusOK), c.get)
+	huma.Register(api, Operation("decide-proposal", http.MethodPost, "/v1/proposals/{id}/decision", RoleAdmin, http.StatusOK), c.decide)
+	huma.Register(api, Operation("revise-proposal", http.MethodPut, "/v1/proposals/{id}/files", RoleAdmin, http.StatusOK), c.revise)
+	huma.Register(api, Operation("retry-proposal", http.MethodPost, "/v1/proposals/{id}/retry", RoleAdmin, http.StatusOK), c.retry)
+	huma.Register(api, Operation("applied-proposal", http.MethodPost, "/v1/proposals/{id}/applied", RoleWriter, http.StatusOK), c.applied)
+	huma.Register(api, Operation("failed-proposal", http.MethodPost, "/v1/proposals/{id}/failed", RoleWriter, http.StatusOK), c.failed)
+	huma.Register(api, Operation("list-rejections", http.MethodGet, "/v1/rejections", RoleWriter, http.StatusOK), c.rejections)
+	huma.Register(api, Operation("add-rejection", http.MethodPost, "/v1/rejections", RoleAdmin, http.StatusNoContent), c.addRejection)
 }
 
 func (c *controller) healthz(_ context.Context, _ *emptyInput) (*emptyOutput, error) {
@@ -171,7 +171,7 @@ func (c *controller) healthz(_ context.Context, _ *emptyInput) (*emptyOutput, er
 func (c *controller) create(ctx context.Context, in *createInput) (*proposalOutput, error) {
 	p, err := c.svc.Create(ctx, in.Body.SourceFlow, in.Body.SourceRun, in.Body.Files)
 	if err != nil {
-		return nil, toHumaError(ctx, err)
+		return nil, ToHumaError(ctx, err)
 	}
 	return &proposalOutput{Body: p}, nil
 }
@@ -182,14 +182,14 @@ func (c *controller) list(ctx context.Context, in *listInput) (*listOutput, erro
 	if in.Status != "" {
 		status, err := pipeline.ParseStatus(in.Status)
 		if err != nil {
-			return nil, toHumaError(ctx, err)
+			return nil, ToHumaError(ctx, err)
 		}
 		filter.Status = &status
 	}
 	if in.Kind != "" {
 		kind, err := pipeline.ParseKind(in.Kind)
 		if err != nil {
-			return nil, toHumaError(ctx, err)
+			return nil, ToHumaError(ctx, err)
 		}
 		filter.Kind = &kind
 	}
@@ -199,7 +199,7 @@ func (c *controller) list(ctx context.Context, in *listInput) (*listOutput, erro
 
 	proposals, err := c.svc.List(ctx, filter)
 	if err != nil {
-		return nil, toHumaError(ctx, err)
+		return nil, ToHumaError(ctx, err)
 	}
 
 	out := &listOutput{}
@@ -213,7 +213,7 @@ func (c *controller) list(ctx context.Context, in *listInput) (*listOutput, erro
 func (c *controller) get(ctx context.Context, in *getInput) (*getOutput, error) {
 	detail, err := c.svc.Get(ctx, in.ID)
 	if err != nil {
-		return nil, toHumaError(ctx, err)
+		return nil, ToHumaError(ctx, err)
 	}
 	if detail.Events == nil {
 		detail.Events = []pipeline.Event{}
@@ -224,7 +224,7 @@ func (c *controller) get(ctx context.Context, in *getInput) (*getOutput, error) 
 func (c *controller) decide(ctx context.Context, in *decisionInput) (*proposalOutput, error) {
 	p, err := c.svc.Decide(ctx, in.ID, in.Body.Actor, in.Body.Decision == "approve", in.Body.Reason)
 	if err != nil {
-		return nil, toHumaError(ctx, err)
+		return nil, ToHumaError(ctx, err)
 	}
 	return &proposalOutput{Body: p}, nil
 }
@@ -232,7 +232,7 @@ func (c *controller) decide(ctx context.Context, in *decisionInput) (*proposalOu
 func (c *controller) revise(ctx context.Context, in *reviseInput) (*proposalOutput, error) {
 	p, err := c.svc.Revise(ctx, in.ID, in.Body.Actor, in.Body.Files)
 	if err != nil {
-		return nil, toHumaError(ctx, err)
+		return nil, ToHumaError(ctx, err)
 	}
 	return &proposalOutput{Body: p}, nil
 }
@@ -240,7 +240,7 @@ func (c *controller) revise(ctx context.Context, in *reviseInput) (*proposalOutp
 func (c *controller) retry(ctx context.Context, in *actorInput) (*proposalOutput, error) {
 	p, err := c.svc.Retry(ctx, in.ID, in.Body.Actor)
 	if err != nil {
-		return nil, toHumaError(ctx, err)
+		return nil, ToHumaError(ctx, err)
 	}
 	return &proposalOutput{Body: p}, nil
 }
@@ -252,7 +252,7 @@ func (c *controller) claim(ctx context.Context, in *claimInput) (*claimOutput, e
 		return &claimOutput{Status: http.StatusNoContent}, nil
 	}
 	if err != nil {
-		return nil, toHumaError(ctx, err)
+		return nil, ToHumaError(ctx, err)
 	}
 	return &claimOutput{Status: http.StatusOK, Body: &p}, nil
 }
@@ -260,7 +260,7 @@ func (c *controller) claim(ctx context.Context, in *claimInput) (*claimOutput, e
 func (c *controller) applied(ctx context.Context, in *appliedInput) (*proposalOutput, error) {
 	p, err := c.svc.MarkApplied(ctx, in.ID, in.Body.Actor, in.Body.SHA)
 	if err != nil {
-		return nil, toHumaError(ctx, err)
+		return nil, ToHumaError(ctx, err)
 	}
 	return &proposalOutput{Body: p}, nil
 }
@@ -268,7 +268,7 @@ func (c *controller) applied(ctx context.Context, in *appliedInput) (*proposalOu
 func (c *controller) failed(ctx context.Context, in *failedInput) (*proposalOutput, error) {
 	p, err := c.svc.MarkFailed(ctx, in.ID, in.Body.Actor, in.Body.Error)
 	if err != nil {
-		return nil, toHumaError(ctx, err)
+		return nil, ToHumaError(ctx, err)
 	}
 	return &proposalOutput{Body: p}, nil
 }
@@ -276,7 +276,7 @@ func (c *controller) failed(ctx context.Context, in *failedInput) (*proposalOutp
 func (c *controller) expire(ctx context.Context, in *expireInput) (*expireOutput, error) {
 	n, err := c.svc.Expire(ctx, time.Duration(in.Body.OlderThanHours)*time.Hour, in.Body.Actor)
 	if err != nil {
-		return nil, toHumaError(ctx, err)
+		return nil, ToHumaError(ctx, err)
 	}
 	out := &expireOutput{}
 	out.Body.Expired = n
@@ -288,14 +288,14 @@ func (c *controller) rejections(ctx context.Context, in *rejectionsInput) (*reje
 	if in.Kind != "" {
 		parsed, err := pipeline.ParseKind(in.Kind)
 		if err != nil {
-			return nil, toHumaError(ctx, err)
+			return nil, ToHumaError(ctx, err)
 		}
 		kind = &parsed
 	}
 
 	rejections, err := c.svc.Rejections(ctx, kind)
 	if err != nil {
-		return nil, toHumaError(ctx, err)
+		return nil, ToHumaError(ctx, err)
 	}
 
 	out := &rejectionsOutput{}
@@ -309,7 +309,7 @@ func (c *controller) rejections(ctx context.Context, in *rejectionsInput) (*reje
 func (c *controller) addRejection(ctx context.Context, in *addRejectionInput) (*emptyOutput, error) {
 	err := c.svc.AddRejection(ctx, pipeline.Kind(in.Body.Kind), in.Body.Name, in.Body.Actor, in.Body.Reason)
 	if err != nil {
-		return nil, toHumaError(ctx, err)
+		return nil, ToHumaError(ctx, err)
 	}
 	return &emptyOutput{}, nil
 }

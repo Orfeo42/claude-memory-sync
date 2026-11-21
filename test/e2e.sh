@@ -318,7 +318,7 @@ assertions_whitelist_rejection
 echo "== 6: canonical push blocked over http =="
 assertions_canonical_push_blocked
 
-echo "== 7: canonical update via memoryctl (as the Windmill flows do) =="
+echo "== 7: canonical update via memoryctl (as the synth flows do) =="
 make_stub_ops
 run_canonical_update "${WORKDIR}/canonical-update.log"
 assertions_after_canonical_update

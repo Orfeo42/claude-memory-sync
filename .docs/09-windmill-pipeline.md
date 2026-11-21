@@ -1,5 +1,7 @@
 # Phase 9 — Windmill pipeline
 
+Status: **superseded 2026-11-21** by phase 13 (`13-drop-windmill.md`) — kept as history.
+
 ## Decision record (2026-08-02)
 
 The shell synthesizer (`build/synthesizer/intake.sh` + `synth.sh`,

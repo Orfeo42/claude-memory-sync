@@ -12,3 +12,5 @@
 /cmd/*/agent
 /cmd/*/memoryctl
 /cmd/*/pipeline
+/synth
+/cmd/*/synth
